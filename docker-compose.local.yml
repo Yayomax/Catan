@@ -1,0 +1,4 @@
+services:
+  litoral:
+    ports:
+      - "3001:3001"

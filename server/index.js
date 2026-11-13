@@ -23,7 +23,17 @@ const MIME = {
 };
 
 const server = http.createServer((req, res) => {
-  const url = decodeURIComponent(req.url.split('?')[0]);
+  let url;
+  try {
+    url = decodeURIComponent(req.url.split('?')[0]);
+  } catch {
+    res.writeHead(400).end();
+    return;
+  }
+  if (url === '/healthz') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' }).end('ok');
+    return;
+  }
   let file = path.normalize(path.join(DIST, url));
   if (!file.startsWith(DIST)) {
     res.writeHead(403).end();

@@ -1,0 +1,11 @@
+# Pensado para Coolify: el proxy de Coolify publica el servicio, por eso no se
+# mapean puertos al host. Para probar en tu máquina usá además el archivo
+# docker-compose.local.yml (ver README).
+services:
+  litoral:
+    build: .
+    restart: unless-stopped
+    environment:
+      - PORT=3001
+    expose:
+      - "3001"

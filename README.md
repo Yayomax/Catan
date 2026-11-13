@@ -20,15 +20,30 @@ con ese código desde su navegador. Si alguien recarga o pierde conexión, vuelv
 
 Para desarrollo, `npm run dev` levanta el servidor y Vite con recarga en `http://localhost:5173`.
 
-## Jugar por internet
+## Despliegue con Docker Compose (Coolify)
 
-Es un solo proceso Node que sirve la página y el WebSocket, así que entra en cualquier
-hosting de Node (Render, Railway, Fly.io):
+El repo trae `Dockerfile` y `docker-compose.yml`. Es un solo contenedor que sirve la
+página y el WebSocket en el puerto 3001.
 
-- build: `npm install && npm run build`
-- start: `npm start` (usa la variable `PORT` si existe)
+En Coolify:
 
-Las salas viven en memoria: si el servidor se reinicia, las partidas en curso se pierden.
+1. Nuevo recurso → repositorio Git → Build Pack **Docker Compose**
+   (archivo `/docker-compose.yml`).
+2. En el servicio `litoral`, asignar el dominio con el puerto del contenedor,
+   por ejemplo `https://litoral.midominio.com:3001`.
+3. Deploy. Coolify se ocupa del HTTPS y del proxy; el WebSocket usa el mismo dominio
+   (`wss://…/ws`), no hace falta configurar nada más.
+
+El compose no publica puertos en la VPS a propósito: el tráfico entra por el proxy de
+Coolify. Para probar la imagen en tu máquina:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+# http://localhost:3001
+```
+
+Las salas viven en memoria: cada redeploy o reinicio del contenedor corta las partidas
+en curso. Tiene que correr una sola réplica.
 
 ## Reglas
 
