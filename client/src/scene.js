@@ -19,12 +19,12 @@ function mulberry(seed) {
 }
 
 const TERRAIN_STYLE = {
-  monte: { base: '#3d6b35', dark: '#2a5127', light: '#55833f' },
-  yerbal: { base: '#93ad4c', dark: '#7a973c', light: '#b2c766' },
-  laguna: { base: '#6f9a5a', dark: '#577f48', light: '#8bb36e' },
-  barranca: { base: '#b9623e', dark: '#96482c', light: '#d08158' },
-  cantera: { base: '#8b9096', dark: '#6c7178', light: '#a9aeb4' },
-  estero: { base: '#7d8a55', dark: '#5f6d42', light: '#99a56c' },
+  bosque: { base: '#3d6b35', dark: '#2a5127', light: '#55833f' },
+  pradera: { base: '#8fb552', dark: '#76a043', light: '#a9cb6a' },
+  campo: { base: '#d9b748', dark: '#bf9a34', light: '#ecd070' },
+  colina: { base: '#b9623e', dark: '#96482c', light: '#d08158' },
+  montana: { base: '#8b9096', dark: '#6c7178', light: '#a9aeb4' },
+  desierto: { base: '#dcc48c', dark: '#c4a96f', light: '#eedaa8' },
 };
 
 function canvasTexture(size, draw) {
@@ -53,7 +53,7 @@ function terrainTexture(type) {
     for (let i = 0; i < 260; i++) blob(rnd() * s, rnd() * s, 8 + rnd() * 34, rnd() < 0.5 ? st.dark : st.light, 0.1);
     for (let i = 0; i < 5000; i++) blob(rnd() * s, rnd() * s, 0.6 + rnd() * 1.6, rnd() < 0.5 ? st.dark : st.light, 0.35);
 
-    if (type === 'barranca' || type === 'cantera') {
+    if (type === 'colina' || type === 'montana') {
       g.globalAlpha = 0.28;
       g.strokeStyle = st.dark;
       for (let i = 0; i < 26; i++) {
@@ -64,41 +64,27 @@ function terrainTexture(type) {
         g.moveTo(x, y);
         for (let k = 0; k < 5; k++) {
           x += (rnd() - 0.3) * 70;
-          y += (rnd() - 0.5) * (type === 'barranca' ? 14 : 60);
+          y += (rnd() - 0.5) * (type === 'colina' ? 14 : 60);
           g.lineTo(x, y);
         }
         g.stroke();
       }
     }
-    if (type === 'yerbal') {
-      g.globalAlpha = 0.16;
-      g.fillStyle = '#5b4526';
-      for (let y = 20; y < s; y += 36) g.fillRect(0, y, s, 7);
+    if (type === 'campo') {
+      g.globalAlpha = 0.2;
+      g.fillStyle = '#7a5a22';
+      for (let y = 14; y < s; y += 30) g.fillRect(0, y, s, 6);
     }
-    const pond = (cx, cy, r) => {
-      for (let i = 0; i < 16; i++) {
-        const a = rnd() * 7;
-        const d = rnd() * r * 0.45;
-        blob(cx + Math.cos(a) * d, cy + Math.sin(a) * d, r * (0.55 + rnd() * 0.3), '#d6c48e', 0.5);
-      }
-      for (let i = 0; i < 22; i++) {
-        const a = rnd() * 7;
-        const d = rnd() * r * 0.4;
-        blob(cx + Math.cos(a) * d, cy + Math.sin(a) * d, r * (0.45 + rnd() * 0.3), i % 3 ? '#2f7f9d' : '#3f9ab3', 0.55);
-      }
-      for (let i = 0; i < 14; i++) {
-        const a = rnd() * 7;
-        const d = rnd() * r * 0.5;
-        g.globalAlpha = 0.35;
-        g.strokeStyle = '#bfe6ee';
-        g.lineWidth = 1.5;
+    if (type === 'desierto') {
+      g.globalAlpha = 0.3;
+      g.strokeStyle = st.dark;
+      g.lineWidth = 3;
+      for (let y = 10; y < s; y += 26) {
         g.beginPath();
-        g.arc(cx + Math.cos(a) * d, cy + Math.sin(a) * d, 5 + rnd() * 10, 0.2, 1.6);
+        for (let x = 0; x <= s; x += 16) g.lineTo(x, y + Math.sin(x * 0.045 + y) * 7);
         g.stroke();
       }
-    };
-    if (type === 'laguna') pond(s / 2, s / 2, s * 0.36);
-    if (type === 'estero') for (let i = 0; i < 7; i++) pond(s * (0.2 + rnd() * 0.6), s * (0.2 + rnd() * 0.6), s * (0.05 + rnd() * 0.07));
+    }
     g.globalAlpha = 1;
   });
 }
@@ -334,7 +320,7 @@ export function createScene(canvas) {
     const side = std('#6d5233', { roughness: 1 });
     const topMats = {};
     for (const type of Object.keys(TERRAIN_STYLE)) {
-      topMats[type] = std('#ffffff', { map: terrainTexture(type), roughness: type === 'laguna' ? 0.55 : 0.95 });
+      topMats[type] = std('#ffffff', { map: terrainTexture(type), roughness: 0.95 });
     }
     const tokenGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.05, 40);
     const tokenFaceGeo = new THREE.CircleGeometry(0.3, 40).rotateX(-Math.PI / 2);
@@ -373,7 +359,7 @@ export function createScene(canvas) {
         tokens.push(tok);
       }
 
-      if (t.terrain === 'monte') {
+      if (t.terrain === 'bosque') {
         for (let i = 0; i < 24; i++) {
           const p = spot(t, 0.56, 0.84);
           const s = 0.6 + rnd() * 0.5;
@@ -386,17 +372,22 @@ export function createScene(canvas) {
             deco.round.push({ ...p, y: H + 0.25 * s, s, sy: s * (0.8 + rnd() * 0.4), ry: rnd() * 6, color: leaf });
           }
         }
-      } else if (t.terrain === 'yerbal') {
-        for (let gx = -4; gx <= 4; gx++) {
-          for (let gz = -4; gz <= 4; gz++) {
-            const dx = gx * 0.19 + (rnd() - 0.5) * 0.03;
-            const dz = gz * 0.2 + (rnd() - 0.5) * 0.03;
-            const d = Math.hypot(dx, dz);
-            if (d < 0.4 || d > 0.78) continue;
-            deco.bush.push({ x: t.x + dx, z: t.z + dz, y: H + 0.03, s: 0.8 + rnd() * 0.5, sy: 0.6 + rnd() * 0.3, color: shade('#5f9a2f', rnd, 0.14) });
-          }
+      } else if (t.terrain === 'pradera') {
+        // Ovejas pastando y matas de pasto.
+        for (let i = 0; i < 7; i++) {
+          const p = spot(t, 0.46, 0.76);
+          const ry = rnd() * Math.PI * 2;
+          const hx = Math.cos(ry) * 0.085;
+          const hz = -Math.sin(ry) * 0.085;
+          deco.bush.push({ ...p, y: H + 0.075, sx: 1.25, sy: 0.85, sz: 0.85, ry, color: shade('#f1ede2', rnd, 0.05) });
+          deco.bush.push({ x: p.x + hx, z: p.z + hz, y: H + 0.095, s: 0.42, color: new THREE.Color('#2e2a26') });
+          for (const k of [-0.045, 0.045]) deco.trunk.push({ x: p.x + Math.cos(ry) * k, z: p.z - Math.sin(ry) * k, y: H, s: 0.32, sx: 0.5, sz: 0.5, color: new THREE.Color('#2e2a26') });
         }
-      } else if (t.terrain === 'barranca') {
+        for (let i = 0; i < 40; i++) {
+          const p = spot(t, 0.4, 0.84);
+          deco.reed.push({ ...p, y: H, s: 0.35 + rnd() * 0.3, sx: 2, sz: 2, color: shade('#5f9a35', rnd, 0.16) });
+        }
+      } else if (t.terrain === 'colina') {
         for (let i = 0; i < 9; i++) {
           const p = spot(t, 0.45, 0.76);
           deco.mound.push({ ...p, y: H, s: 0.7 + rnd() * 0.9, sy: 0.35 + rnd() * 0.35, ry: rnd() * 6, color: shade('#b3552f', rnd, 0.14) });
@@ -406,21 +397,39 @@ export function createScene(canvas) {
           const ry = rnd() * 3;
           for (let k = 0; k < 3; k++) deco.brick.push({ ...p, y: H + 0.03 + k * 0.058, ry: ry + (k % 2) * 0.12, color: shade('#c9673f', rnd, 0.1) });
         }
-      } else if (t.terrain === 'cantera') {
+      } else if (t.terrain === 'montana') {
         for (let i = 0; i < 15; i++) {
           const p = spot(t, 0.42, 0.78);
           const s = 0.5 + rnd() * 1.25;
           deco.rock.push({ ...p, y: H + 0.05 * s, s, sy: s * (0.6 + rnd() * 0.5), ry: rnd() * 6, rx: rnd() * 0.5, color: shade('#8f959c', rnd, 0.2) });
         }
-      } else {
-        const marsh = t.terrain === 'estero';
-        for (let i = 0; i < (marsh ? 70 : 46); i++) {
-          const p = marsh ? spot(t, 0.1, 0.82) : spot(t, 0.6, 0.84);
-          deco.reed.push({ ...p, y: H, s: 0.7 + rnd() * 0.9, rz: (rnd() - 0.5) * 0.3, rx: (rnd() - 0.5) * 0.3, color: shade(marsh ? '#a3a857' : '#7fa544', rnd, 0.18) });
+      } else if (t.terrain === 'campo') {
+        // Hileras de trigo.
+        for (let gx = -8; gx <= 8; gx++) {
+          for (let gz = -5; gz <= 5; gz++) {
+            const dx = gx * 0.095 + (rnd() - 0.5) * 0.03;
+            const dz = gz * 0.15 + (rnd() - 0.5) * 0.02;
+            const d = Math.hypot(dx, dz);
+            if (d < 0.4 || d > 0.8) continue;
+            deco.reed.push({ x: t.x + dx, z: t.z + dz, y: H, s: 0.55 + rnd() * 0.25, sx: 2.6, sz: 2.6, rz: (rnd() - 0.5) * 0.25, color: shade('#e2bd45', rnd, 0.16) });
+          }
         }
-        for (let i = 0; i < (marsh ? 4 : 7); i++) {
-          const p = spot(t, 0.36, 0.56);
-          deco.pad.push({ ...p, y: H + 0.004, s: 0.7 + rnd() * 0.8, color: shade('#4f8f3c', rnd, 0.12) });
+      } else {
+        // Desierto: médanos, piedras sueltas y algún cactus.
+        for (let i = 0; i < 6; i++) {
+          const p = spot(t, 0.2, 0.7);
+          deco.mound.push({ ...p, y: H - 0.01, s: 1 + rnd() * 1.2, sy: 0.16 + rnd() * 0.14, ry: rnd() * 6, color: shade('#e3cd97', rnd, 0.08) });
+        }
+        for (let i = 0; i < 5; i++) {
+          const p = spot(t, 0.3, 0.8);
+          const s = 0.3 + rnd() * 0.4;
+          deco.rock.push({ ...p, y: H + 0.03 * s, s, ry: rnd() * 6, color: shade('#b39a6c', rnd, 0.14) });
+        }
+        for (let i = 0; i < 3; i++) {
+          const p = spot(t, 0.5, 0.78);
+          const s = 0.9 + rnd() * 0.6;
+          deco.trunk.push({ ...p, y: H, s, sx: 1.5, sz: 1.5, color: shade('#4f8a4a', rnd, 0.1) });
+          deco.trunk.push({ x: p.x + 0.045, z: p.z, y: H + 0.07 * s, s: s * 0.45, sx: 1.1, sz: 1.1, rz: -0.9, color: shade('#4f8a4a', rnd, 0.1) });
         }
       }
     }

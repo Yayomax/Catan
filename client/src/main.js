@@ -208,7 +208,7 @@ function renderScreen() {
   const urlCode = new URLSearchParams(location.search).get('sala') || '';
   el.innerHTML = `<div class="sheet">
     <h1>Litoral</h1>
-    <p class="lead">Poblá las islas del delta: juntá recursos, abrí caminos y comerciá con tus amigos.</p>
+    <p class="lead">Poblá la isla: juntá recursos, abrí caminos y comerciá con tus amigos.</p>
     <label>Tu nombre<input id="name" maxlength="16" autocomplete="off" value="${esc(localStorage.getItem('litoral.name') || '')}" placeholder="Nombre" /></label>
     <button class="btn primary" data-act="create">Crear sala</button>
     <div class="or">o</div>
@@ -401,8 +401,11 @@ function modalHTML() {
         ${line('Carta de oficio', COSTS.card, '3 baqueanos jugados dan la Baqueanía (2 puntos).')}
       </ul>
       <p>Cada tirada, los terrenos con ese número dan su recurso a quienes tengan un rancho o pueblo en sus esquinas:
-        ${RES.map((r) => `<span class="mini">${icon(r)}${RES_INFO[r].terrain}</span>`).join(' ')}. El estero no produce.</p>
+        ${RES.map((r) => `<span class="mini">${icon(r)}${RES_INFO[r].terrain}</span>`).join(' ')}. El desierto no produce.</p>
       <p>Con un <b>7</b>, quien tenga más de 7 cartas descarta la mitad y quien tiró mueve el <b>yaguareté</b>: ese terreno deja de producir y le quita una carta a un vecino.</p>
+      <p class="muted">Si ya jugaste a juegos de colonizar islas: rancho = poblado, pueblo = ciudad, yaguareté = ladrón,
+        baqueano = caballero, picada = construcción de caminos, cosecha = dos recursos a elección, feria = monopolio,
+        fiesta patronal = punto de victoria, muelle = puerto.</p>
       <p>Arrastrá para girar la isla, pellizcá o usá la rueda para acercarte.</p>`;
   }
   return '';

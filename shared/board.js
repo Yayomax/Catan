@@ -1,23 +1,23 @@
 // Generación del tablero: una isla de 24 hexágonos (filas 4-5-6-5-4).
 
-export const RES = ['madera', 'arcilla', 'yerba', 'pescado', 'piedra'];
+export const RES = ['madera', 'ladrillo', 'lana', 'trigo', 'piedra'];
 
 export const TERRAIN_RES = {
-  monte: 'madera',
-  barranca: 'arcilla',
-  yerbal: 'yerba',
-  laguna: 'pescado',
-  cantera: 'piedra',
-  estero: null,
+  bosque: 'madera',
+  colina: 'ladrillo',
+  pradera: 'lana',
+  campo: 'trigo',
+  montana: 'piedra',
+  desierto: null,
 };
 
 const TERRAINS = [
-  ...Array(5).fill('monte'),
-  ...Array(5).fill('yerbal'),
-  ...Array(4).fill('laguna'),
-  ...Array(4).fill('barranca'),
-  ...Array(4).fill('cantera'),
-  ...Array(2).fill('estero'),
+  ...Array(5).fill('bosque'),
+  ...Array(5).fill('pradera'),
+  ...Array(4).fill('campo'),
+  ...Array(4).fill('colina'),
+  ...Array(4).fill('montana'),
+  ...Array(2).fill('desierto'),
 ];
 
 const NUMBERS = [2, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 12];
@@ -104,7 +104,7 @@ export function buildBoard(rng = Math.random) {
     let n = 0;
     tiles.forEach((t, i) => {
       t.terrain = terr[i];
-      t.number = terr[i] === 'estero' ? null : nums[n++];
+      t.number = terr[i] === 'desierto' ? null : nums[n++];
     });
     const hot = (t) => t.number === 6 || t.number === 8;
     const clash = tiles.some((t) => hot(t) && [...neighbors[t.id]].some((o) => hot(tiles[o])));

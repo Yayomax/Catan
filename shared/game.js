@@ -6,10 +6,10 @@ import { buildBoard, RES, TERRAIN_RES, shuffle } from './board.js';
 export { RES, TERRAIN_RES };
 
 export const COSTS = {
-  road: { madera: 1, arcilla: 1 },
-  settlement: { madera: 1, arcilla: 1, yerba: 1, pescado: 1 },
-  city: { pescado: 2, piedra: 3 },
-  card: { yerba: 1, pescado: 1, piedra: 1 },
+  road: { madera: 1, ladrillo: 1 },
+  settlement: { madera: 1, ladrillo: 1, lana: 1, trigo: 1 },
+  city: { trigo: 2, piedra: 3 },
+  card: { lana: 1, trigo: 1, piedra: 1 },
 };
 export const LIMITS = { road: 15, settlement: 5, city: 4 };
 export const WIN_POINTS = 10;
@@ -63,7 +63,7 @@ export function createGame(players, rng = Math.random) {
     turnCount: 0,
     dice: null,
     rollId: 0,
-    jaguar: board.tiles.find((t) => t.terrain === 'estero').id,
+    jaguar: board.tiles.find((t) => t.terrain === 'desierto').id,
     afterJaguar: 'main',
     buildings: {},
     roads: {},

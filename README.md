@@ -1,7 +1,7 @@
 # Litoral
 
-Juego de mesa en 3D para 2 a 6 jugadores, ambientado en las islas del delta. Cada jugador
-funda ranchos, abre caminos, junta cinco recursos (madera, arcilla, yerba, pescado y piedra)
+Juego de mesa en 3D para 2 a 6 jugadores, de colonizar una isla. Cada jugador
+funda ranchos, abre caminos, junta cinco recursos (madera, ladrillo, lana, trigo y piedra)
 según la tirada de dados, comercia con los demás y gana quien llega primero a 10 puntos.
 
 Hecho con three.js (tablero, agua, piezas y dados) y un servidor Node con WebSocket que
@@ -49,10 +49,10 @@ en curso. Tiene que correr una sola réplica.
 
 | Construcción | Costo | Efecto |
 | --- | --- | --- |
-| Camino | madera + arcilla | Conecta. 5 o más seguidos: Picada larga (2 puntos) |
-| Rancho | madera + arcilla + yerba + pescado | 1 punto |
-| Pueblo | 2 pescado + 3 piedra | 2 puntos, produce doble |
-| Carta de oficio | yerba + pescado + piedra | Baqueano, Picada, Cosecha, Feria o Fiesta patronal |
+| Camino | madera + ladrillo | Conecta. 5 o más seguidos: Picada larga (2 puntos) |
+| Rancho | madera + ladrillo + lana + trigo | 1 punto |
+| Pueblo | 2 trigo + 3 piedra | 2 puntos, produce doble |
+| Carta de oficio | lana + trigo + piedra | Baqueano, Picada, Cosecha, Feria o Fiesta patronal |
 
 - Cada tirada, los terrenos con ese número dan recursos a los ranchos y pueblos de sus esquinas.
 - Con un 7, quien tenga más de 7 cartas descarta la mitad y se mueve el yaguareté, que

@@ -3,11 +3,11 @@
 const svg = (body) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">${body}</svg>`;
 
 export const RES_INFO = {
-  madera: { label: 'Madera', color: '#5b7a3a', terrain: 'Monte' },
-  arcilla: { label: 'Arcilla', color: '#b5583a', terrain: 'Barranca' },
-  yerba: { label: 'Yerba', color: '#86a83f', terrain: 'Yerbal' },
-  pescado: { label: 'Pescado', color: '#3f86a8', terrain: 'Laguna' },
-  piedra: { label: 'Piedra', color: '#7d848c', terrain: 'Cantera' },
+  madera: { label: 'Madera', color: '#5b7a3a', terrain: 'Bosque' },
+  ladrillo: { label: 'Ladrillo', color: '#b5583a', terrain: 'Colina' },
+  lana: { label: 'Lana', color: '#7da33c', terrain: 'Pradera' },
+  trigo: { label: 'Trigo', color: '#c99a22', terrain: 'Campo' },
+  piedra: { label: 'Piedra', color: '#7d848c', terrain: 'Montaña' },
 };
 
 export const ICONS = {
@@ -20,26 +20,31 @@ export const ICONS = {
       <ellipse cx="36" cy="32" rx="2" ry="3" fill="none"/>
       <ellipse cx="42" cy="20" rx="2" ry="3" fill="none"/>
     </g>`),
-  arcilla: svg(`
+  ladrillo: svg(`
     <g stroke="#5a2414" stroke-width="1.5" fill="#c4633f">
       <rect x="5" y="28" width="18" height="10" rx="1.5"/>
       <rect x="25" y="28" width="18" height="10" rx="1.5" fill="#b5553a"/>
       <rect x="14" y="17" width="20" height="10" rx="1.5" fill="#d07a52"/>
       <rect x="20" y="7" width="14" height="9" rx="1.5" fill="#bf5d3b"/>
     </g>`),
-  yerba: svg(`
-    <g stroke="#2f4a1b" stroke-width="1.5" stroke-linecap="round">
-      <path d="M24 42 C24 30 24 22 24 12" fill="none"/>
-      <path d="M24 30 C14 30 8 23 8 14 C18 14 24 20 24 30Z" fill="#7fae3d"/>
-      <path d="M24 24 C34 24 41 17 41 8 C31 8 24 14 24 24Z" fill="#9cc64f"/>
-      <path d="M24 40 C31 40 36 36 37 30 C30 30 25 33 24 40Z" fill="#6c9a33"/>
+  lana: svg(`
+    <g stroke="#4a4338" stroke-width="1.5" stroke-linejoin="round">
+      <rect x="15" y="31" width="4" height="10" rx="1.5" fill="#3a332b"/>
+      <rect x="27" y="31" width="4" height="10" rx="1.5" fill="#3a332b"/>
+      <path d="M11 30 C5 29 5 20 11 19 C11 12 20 10 23 15 C27 10 36 12 36 19 C42 20 42 29 36 30 C34 36 26 36 23 32 C20 36 13 36 11 30Z" fill="#f6f1e4"/>
+      <ellipse cx="38" cy="20" rx="5" ry="6.5" fill="#3a332b"/>
+      <circle cx="39.5" cy="18.5" r="1.1" fill="#f6f1e4" stroke="none"/>
     </g>`),
-  pescado: svg(`
-    <g stroke="#1d4257" stroke-width="1.5" stroke-linejoin="round">
-      <path d="M5 24 C12 12 26 11 35 24 C26 37 12 36 5 24Z" fill="#6fb3cf"/>
-      <path d="M33 24 L44 14 L41 24 L44 34Z" fill="#4f95b3"/>
-      <path d="M17 15 C20 20 20 28 17 33" fill="none"/>
-      <circle cx="11.5" cy="22" r="1.8" fill="#1d4257" stroke="none"/>
+  trigo: svg(`
+    <g stroke="#6b4a12" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M24 44 L24 16M24 44 C20 38 15 34 11 22M24 44 C28 38 33 34 37 22" fill="none"/>
+      <g fill="#e9bf3f">
+        <ellipse cx="24" cy="10" rx="3.2" ry="6"/>
+        <ellipse cx="19.5" cy="19" rx="2.8" ry="5" transform="rotate(-28 19.5 19)"/>
+        <ellipse cx="28.5" cy="19" rx="2.8" ry="5" transform="rotate(28 28.5 19)"/>
+        <ellipse cx="10" cy="17" rx="2.8" ry="5.5" transform="rotate(-18 10 17)"/>
+        <ellipse cx="38" cy="17" rx="2.8" ry="5.5" transform="rotate(18 38 17)"/>
+      </g>
     </g>`),
   piedra: svg(`
     <g stroke="#3a3f45" stroke-width="1.5" stroke-linejoin="round">

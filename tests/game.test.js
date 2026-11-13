@@ -72,7 +72,7 @@ test('con un 7 se descarta la mitad y se mueve el yaguareté', () => {
   const rng = rngFrom(7);
   const s = mk(2, 7);
   doSetup(s, rng);
-  s.players[1].hand = { madera: 9, arcilla: 0, yerba: 0, pescado: 0, piedra: 0 };
+  s.players[1].hand = { madera: 9, ladrillo: 0, lana: 0, trigo: 0, piedra: 0 };
   const seven = (() => {
     const seq = [0, 0.99];
     let i = 0;
@@ -96,14 +96,14 @@ test('trueque entre jugadores y cambio en el puerto', () => {
   const s = mk(3, 9);
   doSetup(s, rng);
   s.sub = 'main';
-  s.players[0].hand = { madera: 4, arcilla: 0, yerba: 0, pescado: 0, piedra: 0 };
-  s.players[1].hand = { madera: 0, arcilla: 2, yerba: 0, pescado: 0, piedra: 0 };
-  must(s, 0, { type: 'offerTrade', give: { madera: 1 }, get: { arcilla: 2 } }, rng);
+  s.players[0].hand = { madera: 4, ladrillo: 0, lana: 0, trigo: 0, piedra: 0 };
+  s.players[1].hand = { madera: 0, ladrillo: 2, lana: 0, trigo: 0, piedra: 0 };
+  must(s, 0, { type: 'offerTrade', give: { madera: 1 }, get: { ladrillo: 2 } }, rng);
   assert.ok(applyAction(s, 2, { type: 'respondTrade', accept: true }, rng).error);
   must(s, 1, { type: 'respondTrade', accept: true }, rng);
   assert.ok(applyAction(s, 0, { type: 'acceptTrade', with: 2 }, rng).error);
   must(s, 0, { type: 'acceptTrade', with: 1 }, rng);
-  assert.equal(s.players[0].hand.arcilla, 2);
+  assert.equal(s.players[0].hand.ladrillo, 2);
   assert.equal(s.players[1].hand.madera, 1);
   const rate = bankRate(s, 0, 'madera');
   s.players[0].hand.madera = rate;
