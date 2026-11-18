@@ -187,18 +187,20 @@ function renderScreen() {
   const offline = connected ? '' : '<p class="muted">Conectando con el servidor…</p>';
   if (lobby && lobby.players) {
     const host = you === 0;
+    const allReady = lobby.players.every((p) => p.ready);
     el.innerHTML = `<div class="sheet">
       <h1>Litoral</h1>
       <p class="muted">Código de la sala</p>
       <div class="code">${esc(lobby.code)}</div>
       <button class="btn ghost" data-act="copy">Copiar enlace para invitar</button>
       <ul class="roster">${lobby.players
-        .map((p, i) => `<li><span class="dot" style="background:${p.color}"></span>${esc(p.name)}${i === 0 ? ' <em>anfitrión</em>' : ''}${i === you ? ' <em>vos</em>' : ''}</li>`)
+        .map((p, i) => `<li><span class="dot" style="background:${p.color}"></span>${esc(p.name)}${i === 0 ? ' <em>anfitrión</em>' : ''}${i === you ? ' <em>vos</em>' : ''}<span class="rdy ${p.ready ? 'on' : ''}">${p.ready ? 'Listo' : 'Esperando'}</span></li>`)
         .join('')}</ul>
       ${host
-        ? `<button class="btn primary" data-act="start" ${lobby.players.length < 2 ? 'disabled' : ''}>Empezar partida</button>
-           <p class="muted">${lobby.players.length < 2 ? 'Esperando a que entre alguien más (2 a 6 jugadores).' : 'Cuando estén todos, empezá.'}</p>`
-        : `<p class="muted">Esperando a que ${esc(lobby.players[0].name)} empiece la partida…</p>`}
+        ? `<button class="btn primary" data-act="start" ${lobby.players.length < 2 || !allReady ? 'disabled' : ''}>Empezar partida</button>
+           <p class="muted">${lobby.players.length < 2 ? 'Esperando a que entre alguien más (de 2 a 4 jugadores).' : allReady ? 'Están todos listos. ¡A jugar!' : 'Esperando a que todos marquen "Estoy listo".'}</p>`
+        : `<button class="btn ${lobby.players[you].ready ? '' : 'primary'}" data-act="ready" data-v="${lobby.players[you].ready ? '0' : '1'}">${lobby.players[you].ready ? 'Ya no estoy listo' : 'Estoy listo'}</button>
+           <p class="muted">Cuando todos estén listos, ${esc(lobby.players[0].name)} empieza la partida.</p>`}
       <button class="btn link" data-act="leave">Salir de la sala</button>
       ${offline}
     </div>`;
@@ -462,6 +464,7 @@ const ACT = {
     ws.close();
   },
   start: () => send({ t: 'start' }),
+  ready: (d) => send({ t: 'ready', v: d.v === '1' }),
   copy: async () => {
     const url = `${location.origin}/?sala=${lobby.code}`;
     try {

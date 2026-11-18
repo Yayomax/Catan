@@ -206,3 +206,8 @@ small { font-size: 0.72em; }
   .sheet { padding: 18px 14px 14px; }
   .sheet h1 { font-size: 2.4rem; }
 }
+
+.rdy { margin-left: auto; font-size: 0.78rem; padding: 2px 9px; border-radius: 99px; background: #3b241418; color: var(--muted); }
+.rdy.on { background: #3f8a4a; color: #fff; }
+.roster li em + .rdy, .roster li .rdy { margin-left: auto; }
+.roster em { margin-left: 4px; }

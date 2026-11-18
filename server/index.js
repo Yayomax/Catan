@@ -12,7 +12,7 @@ import { createGame, applyAction, viewFor } from '../shared/game.js';
 const PORT = Number(process.env.PORT) || 3001;
 const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 const COLORS = ['#c8402f', '#2f6fb5', '#e3a21a', '#ece6d6', '#3c9a5f', '#8456b0'];
-const MAX_PLAYERS = 6;
+const MAX_PLAYERS = 4;
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript',
@@ -73,7 +73,7 @@ function broadcast(room) {
         t: 'lobby',
         code: room.code,
         you: i,
-        players: room.players.map((q) => ({ name: q.name, color: q.color, online: !!q.ws })),
+        players: room.players.map((q, k) => ({ name: q.name, color: q.color, online: !!q.ws, ready: k === 0 || q.ready })),
       });
       return;
     }
@@ -118,6 +118,7 @@ function handle(ws, m) {
     room.players.push({
       name: cleanName(m.name),
       color: COLORS.find((c) => !used.has(c)),
+      ready: false,
       token: crypto.randomBytes(12).toString('hex'),
       ws: null,
     });
@@ -134,10 +135,17 @@ function handle(ws, m) {
   const room = ws.room;
   if (!room) return fail('No estás en una sala.');
 
+  if (m.t === 'ready') {
+    if (room.game) return;
+    room.players[ws.index].ready = !!m.v;
+    return broadcast(room);
+  }
+
   if (m.t === 'start') {
     if (ws.index !== 0) return fail('Solo quien creó la sala puede empezar.');
     if (room.game && room.game.phase !== 'ended') return fail('La partida ya empezó.');
     if (room.players.length < 2) return fail('Hacen falta al menos 2 jugadores.');
+    if (!room.game && room.players.some((p, k) => k > 0 && !p.ready)) return fail('Todavía no están todos listos.');
     room.game = createGame(room.players);
     return broadcast(room);
   }
