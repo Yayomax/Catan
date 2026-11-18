@@ -18,6 +18,7 @@ const BONUS_MS = 10000;
 const ROLL_MS = 5000; // para tirar los dados
 const DISCARD_MS = 15000; // para descartar con un 7
 const CHAT_MAX = 60;
+const OFFLINE_MS = 30000; // turno de alguien desconectado
 const BONUS_ACTIONS = new Set(['buildRoad', 'buildSettlement', 'buildCity', 'buyCard', 'playCard', 'bankTrade', 'offerTrade', 'acceptTrade']);
 // Solo para pruebas automáticas: permite turnos cortos.
 if (process.env.LITORAL_TEST_TIMERS) TURN_OPTIONS.push(4, 15);
@@ -124,6 +125,7 @@ function broadcast(room) {
       settings: room.settings,
       timer: room.deadline ? { deadline: room.deadline, total: room.timerTotal, stage: timerStage(room.game) } : null,
       now: Date.now(),
+      paused: room.paused || null,
       s: viewFor(room.game, i, withBoard, { hideBank: !room.settings.showBank }),
     });
   });
@@ -140,12 +142,16 @@ function stageMs(room) {
     if (st === 'roll') return ROLL_MS;
     if (st === 'discard') return DISCARD_MS;
   }
-  return room.settings.turnSeconds * 1000;
+  const ms = room.settings.turnSeconds * 1000;
+  // Si el jugador de turno no está conectado, su turno se juega solo a los 30 s.
+  if (!room.players[g.turn]?.ws) return ms ? Math.min(ms, OFFLINE_MS) : OFFLINE_MS;
+  return ms;
 }
 
 function schedule(room) {
   clearTimeout(room.timer);
   room.timer = null;
+  if (room.paused) return;
   const g = room.game;
   const ms = g && g.phase !== 'ended' ? stageMs(room) : 0;
   if (!ms) {
@@ -267,14 +273,38 @@ function handle(ws, m) {
     if (room.players.length < 2) return fail('Hacen falta al menos 2 jugadores.');
     if (!room.game && room.players.some((p, k) => k > 0 && !p.ready)) return fail('Todavía no están todos listos.');
     room.game = createGame(room.players);
+    room.paused = null;
+    room.pausedLeft = null;
     room.turnKey = null;
     room.deadline = null;
     schedule(room);
     return broadcast(room);
   }
 
+  if (m.t === 'pause') {
+    const g = room.game;
+    if (!g || g.phase === 'ended') return;
+    if (m.v && !room.paused) {
+      // Se congela el reloj: se guarda cuánto quedaba.
+      room.paused = { by: ws.index, name: room.players[ws.index].name };
+      room.pausedLeft = room.deadline ? Math.max(1000, room.deadline - Date.now()) : null;
+      clearTimeout(room.timer);
+      room.timer = null;
+      room.deadline = null;
+      g.log.push(`${room.players[ws.index].name} pausó la partida.`);
+    } else if (!m.v && room.paused) {
+      room.paused = null;
+      if (room.pausedLeft) room.deadline = Date.now() + room.pausedLeft;
+      room.pausedLeft = null;
+      g.log.push(`${room.players[ws.index].name} reanudó la partida.`);
+      schedule(room);
+    }
+    return broadcast(room);
+  }
+
   if (m.t === 'act') {
     if (!room.game) return fail('La partida no empezó.');
+    if (room.paused) return fail(`La partida está en pausa (la pausó ${room.paused.name}).`);
     const g = room.game;
     const wasTurn = g.turn === ws.index && g.phase === 'play';
     newFlows(g);
@@ -316,7 +346,7 @@ wss.on('connection', (ws) => {
       // En la sala de espera, quien se va libera su lugar.
       if (!room.game && ws.index !== 0) room.players.splice(ws.index, 1);
       room.players.forEach((q, i) => q.ws && (q.ws.index = i));
-      if (room.game && !room.players.some((q) => q.ws)) schedule(room);
+      if (room.game) schedule(room);
       broadcast(room);
     }
   });

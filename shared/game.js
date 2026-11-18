@@ -685,7 +685,9 @@ export function viewFor(state, pid, withBoard, opts = {}) {
         points: publicPoints(state, p.id),
       };
       if (p.id === pid || state.phase === 'ended') {
-        Object.assign(base, { hand: p.hand, dev: p.dev, newDev: p.newDev, points: totalPoints(state, p.id) });
+        // points: lo que ven todos; realPoints: con tus puntos de victoria ocultos.
+        Object.assign(base, { hand: p.hand, dev: p.dev, newDev: p.newDev, realPoints: totalPoints(state, p.id) });
+        if (state.phase === 'ended') base.points = base.realPoints;
       }
       return base;
     }),

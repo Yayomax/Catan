@@ -82,6 +82,57 @@ export const UI = {
   check: ui('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
   cross: ui('<path d="M6 6l12 12M18 6L6 18"/>'),
   trade: ui('<path d="M4 8h13l-3-3M20 16H7l3 3"/>'),
+  pause: ui('<rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/>'),
+  play: ui('<path d="M7 5l12 7-12 7z" fill="currentColor"/>'),
+  gear: ui('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>'),
 };
 
 export const iconUrl = (name) => `data:image/svg+xml;utf8,${encodeURIComponent(ICONS[name])}`;
+
+// Ilustraciones de las cartas de desarrollo.
+const art = (bg, body) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="10" fill="${bg}"/>${body}</svg>`;
+export const DEV_ART = {
+  baqueano: art('#3a4f7a', `
+    <path d="M32 10c-9 0-15 6-15 15v9h30v-9c0-9-6-15-15-15z" fill="#c9ccd2" stroke="#2a2f38" stroke-width="2"/>
+    <path d="M17 34h30v4c0 3-2 5-5 5H22c-3 0-5-2-5-5z" fill="#a9adb5" stroke="#2a2f38" stroke-width="2"/>
+    <rect x="22" y="24" width="20" height="4" rx="2" fill="#2a2f38"/>
+    <path d="M32 10v14" stroke="#2a2f38" stroke-width="2"/>
+    <path d="M32 6c4 0 8 2 9 5-3-1-6-1-9-1z" fill="#c8402f"/>
+    <path d="M14 56l14-14M28 42l-3-3M28 42l3 3" stroke="#e8d9a8" stroke-width="3" stroke-linecap="round"/>
+    <path d="M50 56L36 42" stroke="#e8d9a8" stroke-width="3" stroke-linecap="round"/>`),
+  picada: art('#6b4a2c', `
+    <path d="M8 50L28 14" stroke="#e3b866" stroke-width="7" stroke-linecap="round"/>
+    <path d="M30 54L52 18" stroke="#e3b866" stroke-width="7" stroke-linecap="round"/>
+    <path d="M8 50L28 14M30 54L52 18" stroke="#8a5a2c" stroke-width="1.5" stroke-dasharray="3 4"/>
+    <circle cx="48" cy="46" r="9" fill="#2f6a2c"/><rect x="47" y="50" width="2.5" height="8" fill="#5a3c22"/>
+    <path d="M14 22l4-6 4 6z" fill="#f6ecd2"/>`),
+  cosecha: art('#4f7a3a', `
+    <path d="M14 46c0-12 8-22 18-22s18 10 18 22z" fill="#a5672f" stroke="#5a3418" stroke-width="2"/>
+    <path d="M14 46h36v4c0 3-2 5-5 5H19c-3 0-5-2-5-5z" fill="#8a5426" stroke="#5a3418" stroke-width="2"/>
+    <ellipse cx="25" cy="24" rx="5" ry="7" fill="#e9bf3f"/><ellipse cx="33" cy="20" rx="5" ry="8" fill="#f3cf5a"/>
+    <circle cx="41" cy="25" r="6" fill="#f6f1e4"/><rect x="28" y="26" width="9" height="6" rx="1" fill="#c4633f"/>
+    <path d="M32 6l2 5 5 1-4 3 1 5-4-3-4 3 1-5-4-3 5-1z" fill="#ffe7a6"/>`),
+  feria: art('#7a3a4f', `
+    <ellipse cx="32" cy="48" rx="17" ry="5" fill="#b9822f"/><rect x="15" y="40" width="34" height="8" fill="#e3b866"/>
+    <ellipse cx="32" cy="40" rx="17" ry="5" fill="#f3cf7a" stroke="#8a5a1c" stroke-width="1.5"/>
+    <rect x="15" y="30" width="34" height="10" fill="#e3b866"/><ellipse cx="32" cy="30" rx="17" ry="5" fill="#ffe7a6" stroke="#8a5a1c" stroke-width="1.5"/>
+    <text x="32" y="34" text-anchor="middle" font-family="Georgia,serif" font-weight="bold" font-size="9" fill="#8a5a1c">M</text>
+    <path d="M10 18c6-4 10 2 16-2M38 16c6 4 10-2 16 2" stroke="#f6ecd2" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <path d="M26 14l6-6 6 6" stroke="#f6ecd2" stroke-width="2.5" fill="none" stroke-linecap="round"/>`),
+  fiesta: art('#8a6a1c', `
+    <path d="M20 10h24v10c0 9-5 15-12 15s-12-6-12-15z" fill="#ffd36b" stroke="#6b4a12" stroke-width="2"/>
+    <path d="M20 14h-6c0 7 3 11 8 12M44 14h6c0 7-3 11-8 12" stroke="#6b4a12" stroke-width="2.5" fill="none"/>
+    <rect x="29" y="35" width="6" height="8" fill="#e3b866" stroke="#6b4a12" stroke-width="1.5"/>
+    <rect x="21" y="43" width="22" height="7" rx="2" fill="#a5672f" stroke="#6b4a12" stroke-width="1.5"/>
+    <path d="M32 15l2 4 4.5.6-3.3 3 .8 4.4-4-2.1-4 2.1.8-4.4-3.3-3 4.5-.6z" fill="#fff6d6"/>
+    <text x="32" y="59" text-anchor="middle" font-family="Georgia,serif" font-weight="bold" font-size="8" fill="#fff6d6">+1</text>`),
+};
+
+// Piezas en miniatura para la crónica.
+export const PIECE_ICON = {
+  settlement: `<svg viewBox="0 0 24 24"><path d="M4 21V11l8-7 8 7v10z" fill="currentColor" stroke="#0006" stroke-width="1.2"/></svg>`,
+  city: `<svg viewBox="0 0 24 24"><path d="M2 21v-8l6-5 6 5v8zM14 21V7l4-4 4 4v14z" fill="currentColor" stroke="#0006" stroke-width="1.2"/></svg>`,
+  road: `<svg viewBox="0 0 24 24"><rect x="2" y="9" width="20" height="6" rx="2" transform="rotate(-25 12 12)" fill="currentColor" stroke="#0006" stroke-width="1.2"/></svg>`,
+  robber: `<svg viewBox="0 0 24 24"><path d="M7 21h10l-2-4h-6zM9.5 17l1-6h3l1 6z" fill="#4a4d52"/><circle cx="12" cy="7.5" r="3.5" fill="#4a4d52"/></svg>`,
+  dice: `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4" fill="#f6f0e2" stroke="#231a14" stroke-width="1.5"/><circle cx="8" cy="8" r="1.6" fill="#231a14"/><circle cx="12" cy="12" r="1.6" fill="#231a14"/><circle cx="16" cy="16" r="1.6" fill="#231a14"/></svg>`,
+};

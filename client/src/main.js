@@ -3,7 +3,8 @@ import {
   RES, COSTS, WIN_POINTS, canAfford, validSettlements, validRoads, validCities,
   validJaguarTiles, stealCandidates, bankRate, piecesLeft, bankCredits,
 } from '../../shared/game.js';
-import { ICONS, RES_INFO, CARD_INFO, UI } from './icons.js';
+import { ICONS, RES_INFO, CARD_INFO, UI, DEV_ART, PIECE_ICON } from './icons.js';
+import { play, unlockAudio, setSoundSettings } from './sounds.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -27,6 +28,14 @@ let mode = null; // 'road' | 'settlement' | 'city'
 let modal = null; // { kind, ...datos }
 let lastRoll = 0;
 let logOpen = false;
+let menuOpen = false;
+let paused = null; // { by, name } si la partida está en pausa
+const prefs = { sound: true, volume: 0.7, ticks: true, anim: true, ...JSON.parse(localStorage.getItem('litoral.prefs') || '{}') };
+setSoundSettings(prefs);
+const savePrefs = () => {
+  localStorage.setItem('litoral.prefs', JSON.stringify(prefs));
+  setSoundSettings(prefs);
+};
 let sideTab = 'log'; // 'log' | 'chat'
 let chat = [];
 let unread = 0;
@@ -97,7 +106,12 @@ function onMessage(m) {
     online = m.online;
     timer = m.timer;
     clockOffset = m.now - Date.now();
+    const prev = fresh ? null : S;
+    const wasPaused = paused;
+    paused = m.paused;
     S = { ...m.s, board };
+    if (prev) soundsFor(prev, S);
+    if (!!wasPaused !== !!paused && !fresh) play('pause');
     scene.sync(S);
     let rolled = false;
     if (S.rollId !== lastRoll) {
@@ -136,6 +150,7 @@ function onMessage(m) {
       unread++;
       toastChat(m.m);
     }
+    if (m.m.from !== you) play('chat');
   } else if (m.t === 'hello') {
     // Hay una versión nueva del juego: recargar para no quedar con la vieja.
     const seen = sessionStorage.getItem('litoral.build');
@@ -166,6 +181,28 @@ function toast(msg) {
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+// ---------- Sonidos según lo que cambió ----------
+
+function soundsFor(a, b) {
+  if (b.phase === 'ended' && a.phase !== 'ended') return play(b.winner === you ? 'win' : 'lose');
+  if (b.rollId !== a.rollId) {
+    play('dice');
+    if (b.dice && b.dice[0] + b.dice[1] === 7) setTimeout(() => play('robber'), 1000);
+  } else if (b.jaguar !== a.jaguar) play('robber');
+  const nb = (x) => Object.keys(x.buildings).length;
+  const cities = (x) => Object.values(x.buildings).filter((v) => v.type === 'city').length;
+  if (cities(b) > cities(a)) play('city');
+  else if (nb(b) > nb(a) || Object.keys(b.roads).length > Object.keys(a.roads).length) play('build');
+  if ((b.longest !== a.longest && b.longest !== null) || (b.largest !== a.largest && b.largest !== null)) setTimeout(() => play('award'), 250);
+  const mine = (x) => x.players[you];
+  if (mine(b).devCount > mine(a).devCount || (b.playedCard && !a.playedCard)) play('devCard');
+  const traded = b.flows.some((f) => (f.from === 'bank' && f.to === you && b.flows.some((g) => g.to === 'bank' && g.from === you)) || (f.from !== 'bank' && f.to !== 'bank' && !f.secret));
+  if (traded && b.rollId === a.rollId) play('trade');
+  if (b.discards[you] && !a.discards[you]) setTimeout(() => play('alert'), 900);
+  const turnChanged = b.turn !== a.turn || (b.phase === 'play' && a.phase === 'setup');
+  if (turnChanged) setTimeout(() => play(b.turn === you ? 'yourTurn' : 'turn'), 150);
 }
 
 // ---------- Ayudas de estado ----------
@@ -358,7 +395,7 @@ function renderPlayers() {
           <div class="who">
             <span class="avatar">${esc(p.name.slice(0, 1).toUpperCase())}</span>
             <b>${esc(p.name)}</b>${p.id === you ? '<em>vos</em>' : ''}${online[p.id] ? '' : '<em class="offline">desconectado</em>'}
-            <span class="vp" title="Puntos de victoria">${UI.vp}${p.points}</span>
+            <span class="vp" title="${p.realPoints !== undefined && p.realPoints !== p.points ? `Los demás ven ${p.points}; con tus puntos de victoria ocultos tenés ${p.realPoints}` : 'Puntos de victoria'}">${UI.vp}${p.points}${p.realPoints !== undefined && p.realPoints !== p.points ? `<small class="real">(${p.realPoints})</small>` : ''}</span>
           </div>
           <div class="badges">
             <span class="b ${p.handCount > 7 ? 'danger' : ''}" title="Cartas de recurso en la mano">${UI.cards}<b>${p.handCount}</b></span>
@@ -371,7 +408,8 @@ function renderPlayers() {
       })
       .join('') +
     `<div class="tools">
-      <button class="chip" data-act="rules">Reglas</button>
+      <button class="chip icon-only" data-act="pause" data-v="${paused ? 0 : 1}" title="${paused ? 'Reanudar' : 'Pausar la partida'}" aria-label="${paused ? 'Reanudar' : 'Pausar'}">${paused ? UI.play : UI.pause}</button>
+      <button class="chip icon-only ${menuOpen ? 'on' : ''}" data-act="menu" title="Menú" aria-label="Menú">${UI.gear}</button>
       <button class="chip only-narrow ${bankOpen ? 'on' : ''}" data-act="bankPanel" id="bankBtn">${UI.bank}<span>Banco</span></button>
       <button class="chip only-narrow ${logOpen && sideTab === 'chat' ? 'on' : ''}" data-act="openChat" id="chatBtn">${UI.chat}<span>Chat</span>${unread ? `<i class="badge">${unread}</i>` : ''}</button>
       <button class="chip only-narrow ${logOpen && sideTab === 'log' ? 'on' : ''}" data-act="log">Crónica</button>
@@ -385,7 +423,7 @@ function renderLog() {
   if (!el.dataset.ready) {
     el.dataset.ready = '1';
     el.innerHTML = `<h3><span class="tabs"><button data-act="tab" data-t="log">Crónica</button><button data-act="tab" data-t="chat">Chat <i class="badge"></i></button></span>
-      <button class="x only-narrow" data-act="log" aria-label="cerrar">×</button></h3>
+      <button class="x only-narrow" data-act="closeSide" aria-label="cerrar">×</button></h3>
       <ol class="loglist"></ol>
       <div class="chatbox"><ol class="chatlist"></ol>
         <form class="chatform" data-form="chat"><input id="chatInput" maxlength="200" autocomplete="off" placeholder="Escribí un mensaje…" />
@@ -395,7 +433,7 @@ function renderLog() {
   el.querySelectorAll('[data-act="tab"]').forEach((b) => b.classList.toggle('on', b.dataset.t === sideTab));
   el.querySelector('.tabs .badge').textContent = unread ? unread : '';
   const ol = el.querySelector('.loglist');
-  ol.innerHTML = S.log.slice(-40).map((l) => `<li>${esc(l)}</li>`).join('');
+  ol.innerHTML = S.log.slice(-40).map((l) => `<li>${fmtLog(l)}</li>`).join('');
   ol.scrollTop = ol.scrollHeight;
   const cl = el.querySelector('.chatlist');
   cl.innerHTML = chat.length
@@ -403,6 +441,32 @@ function renderLog() {
     : '<li class="muted">Todavía no hay mensajes.</li>';
   cl.scrollTop = cl.scrollHeight;
   if (sideTab === 'chat' && (logOpen || !window.matchMedia('(max-width: 860px)').matches)) unread = 0;
+}
+
+// Convierte una línea de la crónica en texto con íconos y nombres de colores.
+const CARD_BY_LABEL = Object.fromEntries(Object.entries(CARD_INFO).map(([id, c]) => [c.label, id]));
+function fmtLog(line) {
+  // Los nombres se marcan primero para que ningún reemplazo posterior los toque.
+  const names = S.players.slice().sort((a, b) => b.name.length - a.name.length);
+  let h = line;
+  names.forEach((p) => (h = h.split(p.name).join(`${p.id}`)));
+  h = esc(h);
+  const first = S.players
+    .map((p) => ({ p, i: line.indexOf(p.name) }))
+    .filter((x) => x.i >= 0)
+    .sort((a, b) => a.i - b.i)[0]?.p;
+  const tint = first ? first.color : '#8a6234';
+  const piece = (k) => `<i class="lp" style="color:${tint}">${PIECE_ICON[k]}</i>`;
+  for (const [label, id] of Object.entries(CARD_BY_LABEL)) {
+    h = h.replace(label, `${id}`);
+  }
+  h = h.replace(/(\d+ )?\b(madera|ladrillo|lana|trigo|piedra)\b/g, (m, n, r) => `<span class="lr" title="${RES_INFO[r].label}">${n ? `<b>${n.trim()}</b>` : ''}${icon(r)}</span>`);
+  h = h.replace(/\b(un pueblo|una ciudad|una carretera|carreteras?)\b/g, (m) => `${piece(m.includes('pueblo') ? 'settlement' : m.includes('ciudad') ? 'city' : 'road')}${m}`);
+  h = h.replace(/\b(el ladrón)/g, (m) => `<i class="lp">${PIECE_ICON.robber}</i>${m}`);
+  h = h.replace(/\btira (\d+)/g, (m, n) => `tira <i class="lp">${PIECE_ICON.dice}</i><b class="ldice ${n === '7' ? 'seven' : ''}">${n}</b>`);
+  h = h.replace(/(\w+)/g, (m, id) => `<i class="ldev">${DEV_ART[id]}</i><b>${CARD_INFO[id].label}</b>`);
+  h = h.replace(/(\d+)/g, (m, i) => `<b class="pname" style="--c:${S.players[i].color}">${esc(S.players[i].name)}</b>`);
+  return h;
 }
 
 let chatToastTimer = null;
@@ -464,11 +528,11 @@ function composerHTML() {
   if (overlap) hint = 'No podés dar y pedir el mismo recurso.';
   const chip = (b, key) =>
     RES.filter((r) => b[r])
-      .map((r) => `<button class="tchip" data-act="tdec" data-k="${key}" data-r="${r}" title="Quitar una" style="--c:${RES_INFO[r].color}">${icon(r)}<b>${b[r]}</b></button>`)
+      .map((r) => `<span class="tcell"><button class="tchip" data-act="tdec" data-k="${key}" data-r="${r}" title="Quitar una" style="--c:${RES_INFO[r].color}">${icon(r)}<b>${b[r]}</b></button><button class="tminus" data-act="tdec" data-k="${key}" data-r="${r}" aria-label="Quitar una">−</button></span>`)
       .join('');
   return `<div class="composer">
     <div class="trow"><span class="lbl">Pedís</span>
-      <div class="tpick">${RES.map((r) => `<button class="tres ${get[r] ? 'on' : ''}" data-act="tinc" data-k="get" data-r="${r}" style="--c:${RES_INFO[r].color}" title="Pedir ${RES_INFO[r].label}">${icon(r)}${get[r] ? `<b>${get[r]}</b>` : ''}</button>`).join('')}</div>
+      <div class="tpick">${RES.map((r) => `<span class="tcell"><button class="tres ${get[r] ? 'on' : ''}" data-act="tinc" data-k="get" data-r="${r}" style="--c:${RES_INFO[r].color}" title="Pedir una ${RES_INFO[r].label.toLowerCase()} más">${icon(r)}${get[r] ? `<b>${get[r]}</b>` : ''}</button>${get[r] ? `<button class="tminus" data-act="tdec" data-k="get" data-r="${r}" aria-label="Pedir una menos">−</button>` : ''}</span>`).join('')}</div>
       <button class="x" data-act="trade" aria-label="cerrar">×</button></div>
     <div class="trow"><span class="lbl">Das</span><div class="tgive">${chip(give, 'give') || '<span class="muted">Tocá tus cartas abajo</span>'}</div></div>
     <div class="trow tacts"><small class="hint">${hint}</small>
@@ -522,10 +586,30 @@ function modalHTML() {
   if (S.discards[you]) {
     if (!modal || modal.kind !== 'discard') modal = { kind: 'discard', cards: zero() };
     const need = S.discards[you];
+    const hand = me().hand;
+    const total = sum(hand);
     const n = sum(modal.cards);
-    return `<h2>Salió un 7</h2><p>Tenés más de 7 cartas: descartá <b>${need}</b>. Te quedan <b class="clockv"></b>; si no elegís, se descarta al azar.</p>
-      ${picker('cards', modal.cards, (r) => Math.min(me().hand[r], modal.cards[r] + need - n), (r) => `tenés ${me().hand[r]}`)}
-      <button class="btn primary" data-act="confirmDiscard" ${n === need ? '' : 'disabled'}>Descartar ${n}/${need}</button>`;
+    const done = n === need;
+    return `<h2>Salió un 7</h2>
+      <div class="dsum">
+        <span>Tenés <b>${total}</b></span><span class="arrow">→</span>
+        <span class="keepn">Te quedás con <b>${total - need}</b></span>
+        <span class="dclock">Quedan <b class="clockv"></b></span>
+      </div>
+      <h4>Te quedás con <span class="muted">— tocá una carta para descartarla</span></h4>
+      <div class="keep">${RES.map((r) => {
+        const k = hand[r] - modal.cards[r];
+        const can = k > 0 && !done;
+        return `<button class="kcard ${k ? '' : 'empty'}" data-act="dkeep" data-r="${r}" ${can ? '' : 'disabled'} style="--c:${RES_INFO[r].color}">
+          ${icon(r)}<b>${k}</b><small>${RES_INFO[r].label}</small></button>`;
+      }).join('')}</div>
+      <h4>Descartás <b class="${done ? 'ok' : ''}">${n} de ${need}</b> <span class="muted">— tocá para devolverla</span></h4>
+      <div class="toss">${RES.filter((r) => modal.cards[r]).map((r) => `<button class="tchip" data-act="dback" data-r="${r}" style="--c:${RES_INFO[r].color}">${icon(r)}<b>${modal.cards[r]}</b></button>`).join('') || '<span class="muted">Todavía nada</span>'}</div>
+      <div class="row">
+        <button class="btn" data-act="drandom">Elegir al azar</button>
+        <button class="btn primary" data-act="confirmDiscard" ${done ? '' : 'disabled'}>${done ? `Descartar ${need} y quedarme con ${total - need}` : `Faltan ${need - n}`}</button>
+      </div>
+      <p class="muted">Si se acaba el tiempo, se descartan al azar.</p>`;
   }
   if (!modal) return '';
   const close = '<button class="x" data-act="close" aria-label="cerrar">×</button>';
@@ -540,7 +624,8 @@ function modalHTML() {
       .filter((c) => counts[c] || fresh[c])
       .map((c) => {
         const playable = c !== 'fiesta' && counts[c] && myTurn() && !S.playedCard && !S.freeRoads && (S.sub === 'main' || (S.sub === 'roll' && c === 'baqueano'));
-        return `<li><div><b>${CARD_INFO[c].label}</b> ×${(counts[c] || 0) + (fresh[c] || 0)}${fresh[c] ? ` <em>${fresh[c]} recién comprada${fresh[c] > 1 ? 's' : ''}</em>` : ''}
+        return `<li><div class="devart">${DEV_ART[c]}<b class="cnt">${(counts[c] || 0) + (fresh[c] || 0)}</b></div>
+          <div class="devtext"><b>${CARD_INFO[c].label}</b>${fresh[c] ? ` <em>${fresh[c]} recién comprada${fresh[c] > 1 ? 's' : ''}</em>` : ''}
           <small>${CARD_INFO[c].text}</small></div>
           ${c === 'fiesta' ? '' : `<button class="btn small" data-act="play" data-c="${c}" ${playable ? '' : 'disabled'}>Jugar</button>`}</li>`;
       })
@@ -571,6 +656,25 @@ function modalHTML() {
       <button class="btn primary" data-act="cosecha" ${n === 2 ? '' : 'disabled'}>Tomar</button>`;
   }
 
+  if (modal.kind === 'settings') {
+    const toggle = (key, label, note) => `<label class="toggle"><span><b>${label}</b><small>${note}</small></span>
+      <input type="checkbox" data-pref="${key}" ${prefs[key] ? 'checked' : ''} /><i></i></label>`;
+    return `${close}<h2>Ajustes</h2>
+      <div class="prefs">
+        ${toggle('sound', 'Sonidos', 'Dados, construcciones, ladrón, turno y chat.')}
+        <label class="slider"><span><b>Volumen</b></span><input type="range" min="0" max="1" step="0.05" value="${prefs.volume}" data-pref="volume" ${prefs.sound ? '' : 'disabled'} /></label>
+        ${toggle('ticks', 'Tic-tac del reloj', 'Suena en los últimos 10 segundos de tu turno.')}
+        ${toggle('anim', 'Animación de cartas', 'Las cartas vuelan entre el banco, tu mano y los jugadores.')}
+      </div>
+      <button class="btn" data-act="testSound">Probar sonido</button>`;
+  }
+
+  if (modal.kind === 'leave') {
+    return `${close}<h2>¿Salir de la partida?</h2>
+      <p>Tu lugar queda en la partida: cuando sea tu turno, el juego tira y pasa solo. Si salís, no vas a poder volver a entrar a esta partida.</p>
+      <div class="row"><button class="btn" data-act="close">Seguir jugando</button><button class="btn danger" data-act="leave">Salir</button></div>`;
+  }
+
   if (modal.kind === 'rules') {
     const line = (label, cost, note) => `<li><b>${label}</b>${costRow(cost)}<small>${note}</small></li>`;
     return `${close}<h2>Cómo se juega</h2>
@@ -588,6 +692,29 @@ function modalHTML() {
       <p>Tenés 5 segundos para tirar los dados; si no, se tiran solos. Arrastrá para girar la isla, pellizcá o usá la rueda para acercarte.</p>`;
   }
   return '';
+}
+
+function renderMenu() {
+  const el = $('menu');
+  el.className = S && menuOpen ? 'show' : '';
+  el.innerHTML = S && menuOpen
+    ? `<button data-act="openSettings">${UI.gear}<span>Ajustes</span></button>
+       <button data-act="pause" data-v="${paused ? 0 : 1}">${paused ? UI.play : UI.pause}<span>${paused ? 'Reanudar' : 'Pausar la partida'}</span></button>
+       <button data-act="openRules">${UI.dev}<span>Reglas</span></button>
+       <button class="danger" data-act="askLeave">${UI.cross}<span>Salir de la partida</span></button>`
+    : '';
+}
+
+function renderPause() {
+  const el = $('pause');
+  const on = S && paused && S.phase !== 'ended';
+  el.className = on ? 'show' : '';
+  el.innerHTML = on
+    ? `<div class="sheet"><div class="pauseicon">${UI.pause}</div><h2>Partida en pausa</h2>
+       <p>La pausó <b style="color:${S.players[paused.by]?.color || 'inherit'}">${esc(paused.name)}</b>. El reloj está detenido.</p>
+       <button class="btn primary" data-act="pause" data-v="0">${UI.play} Reanudar</button>
+       <p class="muted">Cualquier jugador puede reanudarla.</p></div>`
+    : '';
 }
 
 function renderModal() {
@@ -609,6 +736,8 @@ function render() {
     renderTradeBar();
   }
   renderModal();
+  renderMenu();
+  renderPause();
   updateHighlights();
   renderConfirm();
   if (pendingFlows) {
@@ -647,9 +776,14 @@ function anchorFor(who, res) {
   return document.querySelector(`.player[data-pid="${who}"]`);
 }
 
-function landMine(res) {
+let lastCardSound = 0;
+function landMine(res, silent) {
   if (incoming[res] <= 0) return;
   incoming[res]--;
+  if (!silent && performance.now() - lastCardSound > 60) {
+    lastCardSound = performance.now();
+    play('card');
+  }
   const card = document.querySelector(`#hand .card[data-r="${res}"]`);
   if (!card || !S) return;
   const n = Math.max(0, me().hand[res] - incoming[res]);
@@ -658,7 +792,7 @@ function landMine(res) {
 }
 
 function animateFlows(flows) {
-  const still = !S || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const still = !S || !prefs.anim || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let k = 0;
   for (const f of flows) {
     const mine = f.to === you && f.res;
@@ -666,7 +800,7 @@ function animateFlows(flows) {
     const to = still ? null : anchorFor(f.to, f.res);
     const flying = from && to ? Math.min(f.n, 6) : 0;
     for (let i = 0; i < flying; i++) flyCard(f.res, from, to, k++ * 70, mine ? () => landMine(f.res) : null);
-    if (mine) for (let i = flying; i < f.n; i++) landMine(f.res);
+    if (mine) for (let i = flying; i < f.n; i++) landMine(f.res, true);
   }
 }
 
@@ -733,6 +867,9 @@ const ACT = {
     else if (name) toast('El código tiene 4 letras.');
   },
   leave: () => {
+    modal = null;
+    menuOpen = false;
+    S = null;
     session.clear();
     history.replaceState(null, '', location.pathname);
     lobby = null;
@@ -832,6 +969,60 @@ const ACT = {
     modal = { kind: 'rules' };
     render();
   },
+  closeSide: () => {
+    logOpen = false;
+    render();
+  },
+  menu: () => {
+    menuOpen = !menuOpen;
+    render();
+  },
+  openSettings: () => {
+    menuOpen = false;
+    modal = { kind: 'settings' };
+    render();
+  },
+  openRules: () => {
+    menuOpen = false;
+    modal = { kind: 'rules' };
+    render();
+  },
+  askLeave: () => {
+    menuOpen = false;
+    modal = { kind: 'leave' };
+    render();
+  },
+  pause: (d) => {
+    menuOpen = false;
+    send({ t: 'pause', v: d.v === '1' });
+    render();
+  },
+  testSound: () => {
+    unlockAudio();
+    play('yourTurn');
+    setTimeout(() => play('dice'), 500);
+  },
+  dkeep: (d) => {
+    const need = S.discards[you];
+    if (sum(modal.cards) < need && modal.cards[d.r] < me().hand[d.r]) modal.cards[d.r]++;
+    play('click');
+    render();
+  },
+  dback: (d) => {
+    modal.cards[d.r] = Math.max(0, modal.cards[d.r] - 1);
+    render();
+  },
+  drandom: () => {
+    const need = S.discards[you];
+    const pool = RES.flatMap((r) => Array(me().hand[r]).fill(r));
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    modal.cards = zero();
+    for (const r of pool.slice(0, need)) modal.cards[r]++;
+    render();
+  },
   log: () => {
     if (!logOpen || sideTab === 'log') logOpen = !logOpen;
     sideTab = 'log';
@@ -885,8 +1076,27 @@ const ACT = {
 };
 
 document.addEventListener('click', (ev) => {
+  unlockAudio();
   const el = ev.target.closest('[data-act]');
+  if (menuOpen && !ev.target.closest('#menu') && !(el && el.dataset.act === 'menu')) {
+    menuOpen = false;
+    renderMenu();
+    renderPlayers();
+  }
   if (el && !el.disabled) ACT[el.dataset.act]?.(el.dataset);
+});
+document.addEventListener('pointerdown', unlockAudio, { once: true });
+document.addEventListener('change', (ev) => {
+  const k = ev.target.dataset?.pref;
+  if (!k) return;
+  prefs[k] = ev.target.type === 'checkbox' ? ev.target.checked : Number(ev.target.value);
+  savePrefs();
+  if (k === 'sound') render();
+});
+document.addEventListener('input', (ev) => {
+  if (ev.target.dataset?.pref !== 'volume') return;
+  prefs.volume = Number(ev.target.value);
+  savePrefs();
 });
 document.addEventListener('submit', (ev) => {
   if (ev.target.dataset.form !== 'chat') return;
@@ -905,6 +1115,7 @@ document.addEventListener('keydown', (ev) => {
 
 // Reloj del turno: se actualiza solo, sin redibujar todo.
 let lastLeft = null;
+let lastTick = null;
 let flashUntil = 0;
 function tickClock() {
   const el = $('clock');
@@ -928,6 +1139,9 @@ function tickClock() {
   });
   if (lastLeft !== null && left > lastLeft + 3 && left < Math.round(timer.total / 1000)) flashUntil = Date.now() + 900;
   lastLeft = left;
+  const mineNow = S.phase !== 'ended' && ((S.turn === you && !S.discards[you] && timer.stage !== 'discard') || (S.discards[you] && timer.stage === 'discard'));
+  if (prefs.ticks && mineNow && left <= 10 && left > 0 && left !== lastTick) play('tick', left <= 3);
+  lastTick = left;
   const who = S.players[S.turn];
   bar.className = `show${left <= 10 ? ' low' : ''}${Date.now() < flashUntil ? ' flash' : ''}`;
   bar.style.setProperty('--c', who.color);

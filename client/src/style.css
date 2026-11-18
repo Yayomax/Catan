@@ -401,3 +401,94 @@ small { font-size: 0.72em; }
 
 .byline { margin-top: -8px; color: var(--muted); letter-spacing: 0.04em; }
 .byline b { color: #c4552a; }
+
+/* ---------- Puntos propios ---------- */
+.player .vp small.real { margin-left: 3px; font-size: 0.78rem; color: #f6ecd2; opacity: 0.8; }
+
+/* ---------- Menú y pausa ---------- */
+.chip.icon-only { padding: 6px 9px; }
+.chip.icon-only svg { width: 16px; height: 16px; }
+#menu {
+  position: fixed; z-index: 7; top: 52px; right: 10px; display: none; flex-direction: column; min-width: 220px; padding: 6px;
+  border-radius: 12px; background: linear-gradient(160deg, var(--wood-2), var(--wood)); border: 2px solid var(--wood-edge); box-shadow: 0 10px 28px #000b;
+}
+#menu.show { display: flex; animation: drop 0.15s ease-out; }
+#menu button {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 0; border-radius: 8px; background: none; color: #f2e4c4;
+  font-size: 0.98rem; cursor: pointer; text-align: left;
+}
+#menu button:hover { background: #ffffff14; }
+#menu button svg { width: 18px; height: 18px; }
+#menu button.danger { color: #ff8a73; }
+#pause { position: fixed; inset: 0; z-index: 6; display: none; place-items: center; background: #06141bc8; backdrop-filter: blur(3px); padding: 14px; }
+#pause.show { display: grid; }
+#pause .pauseicon { width: 54px; height: 54px; margin: 0 auto; color: var(--wood-2); }
+#pause .pauseicon svg { width: 100%; height: 100%; }
+.btn.danger { background: linear-gradient(#c4553f, #8c2a1d); border-color: #ff8a73; color: #fff; }
+
+/* ---------- Ajustes ---------- */
+.prefs { display: grid; gap: 4px; text-align: left; }
+.toggle, .slider { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px; border-bottom: 1px solid #b79f6c; cursor: pointer; color: var(--ink); font-size: 1rem; }
+.toggle small { display: block; color: var(--muted); font-size: 0.8rem; }
+.toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.toggle i { flex: none; width: 46px; height: 26px; border-radius: 99px; background: #b79f6c; position: relative; transition: background 0.2s; }
+.toggle i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fffaf0; box-shadow: 0 1px 3px #0006; transition: transform 0.2s; }
+.toggle input:checked + i { background: #3f8a4a; }
+.toggle input:checked + i::after { transform: translateX(20px); }
+.slider input { width: 55%; accent-color: #8a6234; }
+
+/* ---------- Crónica con íconos ---------- */
+#log li { display: block; line-height: 1.55; }
+.pname { color: var(--ink); white-space: nowrap; }
+.pname::before { content: ''; display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--c); margin-right: 4px; box-shadow: 0 0 0 1px #0005; vertical-align: 0; }
+.lr { display: inline-flex; align-items: center; gap: 1px; vertical-align: -5px; padding: 0 3px 0 2px; border-radius: 5px; background: #fff7; border: 1px solid #c9b37f; margin: 0 1px; }
+.lr b { font-size: 0.8rem; }
+.lr .ico { width: 17px; height: 17px; }
+.lp { display: inline-block; width: 16px; height: 16px; vertical-align: -3px; margin-right: 2px; }
+.lp svg, .ldev svg { width: 100%; height: 100%; display: block; }
+.ldev { display: inline-block; width: 18px; height: 18px; vertical-align: -4px; margin-right: 3px; border-radius: 4px; overflow: hidden; }
+.ldice { display: inline-block; min-width: 20px; text-align: center; padding: 0 4px; border-radius: 5px; background: #f6f0e2; border: 1px solid #231a14; font-size: 0.85rem; }
+.ldice.seven { background: #b3261e; color: #fff; border-color: #b3261e; }
+
+/* ---------- Cartas de desarrollo ---------- */
+.devlist li { gap: 12px; }
+.devart { position: relative; flex: none; width: 58px; height: 58px; border-radius: 10px; overflow: visible; box-shadow: 0 3px 8px #0006; }
+.devart svg { width: 100%; height: 100%; display: block; border-radius: 10px; }
+.devart .cnt { position: absolute; top: -7px; right: -7px; min-width: 22px; height: 22px; border-radius: 99px; background: var(--wood); color: var(--gold); display: grid; place-items: center; font-size: 0.8rem; border: 2px solid var(--paper); }
+.devtext { flex: 1; min-width: 0; }
+
+/* ---------- Descarte ---------- */
+.dsum { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; font-size: 1.05rem; }
+.dsum b { font-size: 1.4rem; }
+.dsum .keepn { padding: 4px 12px; border-radius: 99px; background: #3f8a4a; color: #fff; }
+.dsum .dclock { font-size: 0.9rem; color: var(--muted); }
+.dsum .dclock b { font-size: 1rem; }
+.keep { display: flex; gap: 8px; justify-content: center; }
+.kcard {
+  position: relative; flex: 1; max-width: 84px; padding: 10px 4px 8px; border-radius: 10px; display: grid; justify-items: center; gap: 2px; cursor: pointer;
+  background: linear-gradient(165deg, #fbf3da, #e7d5a6); border: 2px solid var(--c); box-shadow: 0 3px 8px #0005; transition: transform 0.12s;
+}
+.kcard:hover:not(:disabled) { transform: translateY(-3px); }
+.kcard:active:not(:disabled) { transform: scale(0.96); }
+.kcard .ico { width: 34px; height: 34px; }
+.kcard b { font-size: 1.9rem; line-height: 1; }
+.kcard small { color: var(--muted); font-size: 0.72rem; }
+.kcard.empty { opacity: 0.4; filter: grayscale(0.8); }
+.kcard:disabled { cursor: default; }
+.toss { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; min-height: 48px; align-items: center; }
+.sheet h4 b.ok { color: #2f6f3a; }
+
+/* ---------- Comercio: quitar fácil ---------- */
+.tcell { position: relative; display: inline-flex; }
+.tminus {
+  position: absolute; left: -7px; bottom: -7px; width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fbf3da; cursor: pointer;
+  background: #8c2a1d; color: #fff; font-size: 1rem; line-height: 1; display: grid; place-items: center; padding: 0; box-shadow: 0 1px 4px #0007;
+}
+.tchip:hover::after { content: none; }
+
+@media (max-width: 860px) {
+  #menu { top: 44px; right: 8px; }
+  .kcard { padding: 8px 2px 6px; }
+  .kcard .ico { width: 28px; height: 28px; }
+  .kcard b { font-size: 1.5rem; }
+}
