@@ -198,7 +198,7 @@ function renderScreen() {
         .join('')}</ul>
       ${host
         ? `<button class="btn primary" data-act="start" ${lobby.players.length < 2 || !allReady ? 'disabled' : ''}>Empezar partida</button>
-           <p class="muted">${lobby.players.length < 2 ? 'Esperando a que entre alguien más (de 2 a 4 jugadores).' : allReady ? 'Están todos listos. ¡A jugar!' : 'Esperando a que todos marquen "Estoy listo".'}</p>`
+           <p class="muted">${lobby.players.length < 2 ? 'Esperando a que entre alguien más (de 2 a 6 jugadores).' : allReady ? 'Están todos listos. ¡A jugar!' : 'Esperando a que todos marquen "Estoy listo".'}</p>`
         : `<button class="btn ${lobby.players[you].ready ? '' : 'primary'}" data-act="ready" data-v="${lobby.players[you].ready ? '0' : '1'}">${lobby.players[you].ready ? 'Ya no estoy listo' : 'Estoy listo'}</button>
            <p class="muted">Cuando todos estén listos, ${esc(lobby.players[0].name)} empieza la partida.</p>`}
       <button class="btn link" data-act="leave">Salir de la sala</button>

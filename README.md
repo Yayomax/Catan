@@ -1,6 +1,6 @@
 # Litoral
 
-Juego de mesa en 3D para 2 a 4 jugadores, de colonizar una isla. Cada jugador
+Juego de mesa en 3D para 2 a 6 jugadores, de colonizar una isla. Cada jugador
 funda ranchos, abre caminos, junta cinco recursos (madera, ladrillo, lana, trigo y piedra)
 según la tirada de dados, comercia con los demás y gana quien llega primero a 10 puntos.
 

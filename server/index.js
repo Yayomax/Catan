@@ -12,7 +12,7 @@ import { createGame, applyAction, viewFor } from '../shared/game.js';
 const PORT = Number(process.env.PORT) || 3001;
 const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 const COLORS = ['#c8402f', '#2f6fb5', '#e3a21a', '#ece6d6', '#3c9a5f', '#8456b0'];
-const MAX_PLAYERS = 4;
+const MAX_PLAYERS = 6;
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript',
