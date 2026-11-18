@@ -336,6 +336,7 @@ function renderScreen() {
   const urlCode = new URLSearchParams(location.search).get('sala') || '';
   el.innerHTML = `<div class="sheet">
     <h1>Litoral</h1>
+    <div class="byline">by <b>Rocket Flame</b></div>
     <p class="lead">Poblá la isla: juntá recursos, construí carreteras y comerciá con tus amigos.</p>
     ${notice ? `<p class="notice">${esc(notice)}</p>` : ''}
     <label>Tu nombre<input id="name" maxlength="16" autocomplete="off" value="${esc(localStorage.getItem('litoral.name') || '')}" placeholder="Nombre" /></label>

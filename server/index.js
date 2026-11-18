@@ -28,6 +28,8 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  '.jpg': 'image/jpeg',
+  '.webp': 'image/webp',
 };
 
 const server = http.createServer((req, res) => {
@@ -63,6 +65,13 @@ const server = http.createServer((req, res) => {
       return;
     }
     const hashed = file.includes(`${path.sep}assets${path.sep}`);
+    if (path.basename(file) === 'index.html') {
+      // Las previews de WhatsApp e Instagram necesitan la dirección completa de la imagen.
+      const host = String(req.headers['x-forwarded-host'] || req.headers.host || 'localhost').split(',')[0].trim();
+      const local = /^(localhost|127\.|\[::1\])/.test(host);
+      const proto = String(req.headers['x-forwarded-proto'] || (local ? 'http' : 'https')).split(',')[0].trim();
+      data = Buffer.from(data.toString('utf8').replaceAll('__ORIGIN__', `${proto}://${host}`));
+    }
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
       // Los archivos con hash en el nombre no cambian nunca; la página siempre se revalida.

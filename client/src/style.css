@@ -398,3 +398,6 @@ small { font-size: 0.72em; }
   #players .player { flex: 1 1 0; min-width: 150px; }
   #bank { top: 132px; }
 }
+
+.byline { margin-top: -8px; color: var(--muted); letter-spacing: 0.04em; }
+.byline b { color: #c4552a; }
