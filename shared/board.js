@@ -1,4 +1,4 @@
-// Generación del tablero: una isla de 24 hexágonos (filas 4-5-6-5-4).
+// Generación del tablero: isla de 19 hexágonos (hasta 4 jugadores) o 30 (5 a 6).
 
 export const RES = ['madera', 'ladrillo', 'lana', 'trigo', 'piedra'];
 
@@ -11,16 +11,25 @@ export const TERRAIN_RES = {
   desierto: null,
 };
 
-const TERRAINS = [
-  ...Array(5).fill('bosque'),
-  ...Array(5).fill('pradera'),
-  ...Array(4).fill('campo'),
-  ...Array(4).fill('colina'),
-  ...Array(4).fill('montana'),
-  ...Array(2).fill('desierto'),
-];
+// Juego base (2 a 4 jugadores) y ampliación para 5 a 6, con las cantidades
+// del juego original.
+export const LAYOUTS = {
+  base: {
+    rows: [3, 4, 5, 4, 3],
+    terrains: { bosque: 4, pradera: 4, campo: 4, colina: 3, montana: 3, desierto: 1 },
+    // Fichas A–R en el orden en que se colocan en espiral.
+    spiral: [5, 2, 6, 3, 8, 10, 9, 12, 11, 4, 8, 10, 9, 4, 5, 6, 3, 11],
+    ports: ['any', 'any', 'any', 'any', 'madera', 'ladrillo', 'lana', 'trigo', 'piedra'],
+  },
+  grande: {
+    rows: [3, 4, 5, 6, 5, 4, 3],
+    terrains: { bosque: 6, pradera: 6, campo: 6, colina: 5, montana: 5, desierto: 2 },
+    numbers: [2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 8, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 12, 12],
+    ports: ['any', 'any', 'any', 'any', 'any', 'madera', 'ladrillo', 'lana', 'lana', 'trigo', 'piedra'],
+  },
+};
 
-const NUMBERS = [2, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 12];
+export const layoutFor = (players) => (players > 4 ? 'grande' : 'base');
 
 export function shuffle(arr, rng) {
   const a = arr.slice();
@@ -31,16 +40,13 @@ export function shuffle(arr, rng) {
   return a;
 }
 
-export function buildBoard(rng = Math.random) {
+export function buildBoard(rng = Math.random, players = 4) {
+  const L = LAYOUTS[layoutFor(players)];
   const S3 = Math.sqrt(3);
   const tiles = [];
-  for (let r = -2; r <= 2; r++) {
-    const q0 = Math.max(-2, -2 - r);
-    const q1 = Math.min(2, 2 - r) + 1;
-    for (let q = q0; q <= q1; q++) {
-      tiles.push({ id: tiles.length, q, r, x: S3 * (q + r / 2), z: 1.5 * r });
-    }
-  }
+  L.rows.forEach((len, r) => {
+    for (let i = 0; i < len; i++) tiles.push({ id: tiles.length, x: S3 * (i - (len - 1) / 2), z: 1.5 * r });
+  });
   // Centrar la isla en el origen.
   const cx = tiles.reduce((s, t) => s + t.x, 0) / tiles.length;
   const cz = tiles.reduce((s, t) => s + t.z, 0) / tiles.length;
@@ -97,18 +103,31 @@ export function buildBoard(rng = Math.random) {
     }
   }
 
-  // Terrenos y fichas numeradas; los 6 y 8 nunca quedan pegados.
-  for (let attempt = 0; attempt < 500; attempt++) {
-    const terr = shuffle(TERRAINS, rng);
-    const nums = shuffle(NUMBERS, rng);
-    let n = 0;
-    tiles.forEach((t, i) => {
-      t.terrain = terr[i];
-      t.number = terr[i] === 'desierto' ? null : nums[n++];
-    });
-    const hot = (t) => t.number === 6 || t.number === 8;
-    const clash = tiles.some((t) => hot(t) && [...neighbors[t.id]].some((o) => hot(tiles[o])));
-    if (!clash) break;
+  // Terrenos al azar; fichas en espiral (base) o al azar (grande).
+  // En ambos casos un 6 y un 8 nunca quedan pegados.
+  const terrainPool = Object.entries(L.terrains).flatMap(([t, n]) => Array(n).fill(t));
+  const hot = (n) => n === 6 || n === 8;
+  const clash = () => tiles.some((t) => hot(t.number) && [...neighbors[t.id]].some((o) => hot(tiles[o].number)));
+  let placed = false;
+  for (let attempt = 0; attempt < 500 && !placed; attempt++) {
+    shuffle(terrainPool, rng).forEach((terr, i) => (tiles[i].terrain = terr));
+    if (L.spiral) {
+      const corners = tiles.filter((t) => neighbors[t.id].size === 3);
+      for (const corner of shuffle(corners, rng)) {
+        const order = spiralOrder(tiles, neighbors, corner.id);
+        let n = 0;
+        for (const id of order) tiles[id].number = tiles[id].terrain === 'desierto' ? null : L.spiral[n++];
+        if (!clash()) {
+          placed = true;
+          break;
+        }
+      }
+    } else {
+      const nums = shuffle(L.numbers, rng);
+      let n = 0;
+      for (const t of tiles) t.number = t.terrain === 'desierto' ? null : nums[n++];
+      placed = !clash();
+    }
   }
 
   // Puertos repartidos por la costa.
@@ -120,11 +139,42 @@ export function buildBoard(rng = Math.random) {
       return { e, ang: Math.atan2(mz, mx) };
     })
     .sort((p, q) => p.ang - q.ang);
-  const types = shuffle([...RES, 'any', 'any', 'any', 'any', 'any'], rng);
+  const types = shuffle(L.ports, rng);
   const ports = types.map((type, i) => {
     const { e } = coast[Math.round((i * coast.length) / types.length) % coast.length];
     return { edge: e.id, a: e.a, b: e.b, type };
   });
 
   return { tiles, vertices, edges, ports };
+}
+
+// Recorrido en espiral hacia adentro, en sentido antihorario, desde una esquina.
+export function spiralOrder(tiles, neighbors, startId) {
+  const left = new Set(tiles.map((t) => t.id));
+  const order = [];
+  let anchor = tiles[startId];
+  while (left.size) {
+    const ids = [...left];
+    const cx = ids.reduce((s, i) => s + tiles[i].x, 0) / ids.length;
+    const cz = ids.reduce((s, i) => s + tiles[i].z, 0) / ids.length;
+    const ring = ids.filter((i) => [...neighbors[i]].filter((o) => left.has(o)).length < 6);
+    const ang = (i) => Math.atan2(tiles[i].z - cz, tiles[i].x - cx);
+    ring.sort((a, b) => ang(b) - ang(a));
+    let start = 0;
+    let best = Infinity;
+    ring.forEach((i, k) => {
+      const d = Math.hypot(tiles[i].x - anchor.x, tiles[i].z - anchor.z);
+      if (d < best - 1e-6) {
+        best = d;
+        start = k;
+      }
+    });
+    const walk = [...ring.slice(start), ...ring.slice(0, start)];
+    for (const i of walk) {
+      order.push(i);
+      left.delete(i);
+    }
+    anchor = tiles[walk[0]];
+  }
+  return order;
 }

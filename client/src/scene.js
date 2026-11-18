@@ -770,7 +770,10 @@ export function createScene(canvas) {
     if (!force && Math.abs(camera.aspect - lastAspect) < 0.25) return;
     lastAspect = camera.aspect;
     const half = Math.tan((camera.fov * Math.PI) / 360);
-    const dist = Math.max(17.5, 6.7 / (half * camera.aspect));
+    // Tamaño de la isla: el tablero base y el grande se encuadran distinto.
+    const ex = board ? Math.max(...board.tiles.map((t) => Math.abs(t.x))) + 1 : 5.33;
+    const ez = board ? Math.max(...board.tiles.map((t) => Math.abs(t.z))) + 1 : 4;
+    const dist = Math.max(17.5 * (ez / 4), (6.7 * (ex / 5.33)) / (half * camera.aspect));
     const dir = new THREE.Vector3(0, 1, 0.72).normalize();
     camera.position.copy(controls.target).addScaledVector(dir, dist);
     controls.update();

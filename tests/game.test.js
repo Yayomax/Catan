@@ -4,7 +4,7 @@ import {
   createGame, applyAction, viewFor, validSettlements, validRoads, validCities,
   validJaguarTiles, stealCandidates, canAfford, bankRate, COSTS, RES, WIN_POINTS, timeoutTurn, turnKey,
 } from '../shared/game.js';
-import { buildBoard } from '../shared/board.js';
+import { buildBoard, spiralOrder } from '../shared/board.js';
 
 function rngFrom(seed) {
   let s = seed >>> 0;
@@ -30,20 +30,57 @@ function doSetup(state, rng) {
   }
 }
 
-test('el tablero tiene 24 terrenos, 10 puertos y sin 6/8 pegados', () => {
-  for (let seed = 1; seed < 30; seed++) {
-    const b = buildBoard(rngFrom(seed));
-    assert.equal(b.tiles.length, 24);
-    assert.equal(b.ports.length, 10);
-    assert.equal(new Set(b.ports.map((p) => p.edge)).size, 10);
-    assert.equal(b.tiles.filter((t) => t.number === null).length, 2);
+const count = (arr) => arr.reduce((m, x) => ((m[x] = (m[x] || 0) + 1), m), {});
+
+test('tablero base (2 a 4): 19 terrenos, 1 desierto, 18 fichas y 9 puertos', () => {
+  for (let seed = 1; seed < 40; seed++) {
+    const b = buildBoard(rngFrom(seed), 2 + (seed % 3));
+    assert.equal(b.tiles.length, 19);
+    assert.deepEqual(count(b.tiles.map((t) => t.terrain)), { bosque: 4, pradera: 4, campo: 4, colina: 3, montana: 3, desierto: 1 });
+    const nums = b.tiles.map((t) => t.number).filter(Boolean);
+    assert.deepEqual(count(nums), { 2: 1, 3: 2, 4: 2, 5: 2, 6: 2, 8: 2, 9: 2, 10: 2, 11: 2, 12: 1 });
+    assert.equal(b.tiles.find((t) => t.terrain === 'desierto').number, null);
+    assert.deepEqual(count(b.ports.map((p) => p.type)), { any: 4, madera: 1, ladrillo: 1, lana: 1, trigo: 1, piedra: 1 });
+    assert.equal(new Set(b.ports.map((p) => p.edge)).size, 9);
+    for (const v of b.vertices) assert.ok(v.adj.length >= 2 && v.adj.length <= 3);
+  }
+});
+
+test('las fichas del tablero base van en espiral A–R y sin 6/8 pegados', () => {
+  const A_R = [5, 2, 6, 3, 8, 10, 9, 12, 11, 4, 8, 10, 9, 4, 5, 6, 3, 11];
+  for (let seed = 1; seed < 40; seed++) {
+    const b = buildBoard(rngFrom(seed), 4);
+    const nb = b.tiles.map(() => new Set());
+    for (const e of b.edges) if (e.tiles.length === 2) {
+      nb[e.tiles[0]].add(e.tiles[1]);
+      nb[e.tiles[1]].add(e.tiles[0]);
+    }
+    // Existe una esquina desde la que la espiral reproduce A–R.
+    const ok = b.tiles.filter((t) => nb[t.id].size === 3).some((c) => {
+      const order = spiralOrder(b.tiles, nb, c.id);
+      for (let i = 1; i < order.length; i++) if (!nb[order[i - 1]].has(order[i])) return false;
+      const seq = order.map((id) => b.tiles[id].number).filter(Boolean);
+      return seq.join() === A_R.join();
+    });
+    assert.ok(ok, `seed ${seed}: las fichas no siguen la espiral`);
     for (const e of b.edges) {
       if (e.tiles.length < 2) continue;
       const [x, y] = e.tiles.map((t) => b.tiles[t].number);
-      assert.ok(!([6, 8].includes(x) && [6, 8].includes(y)));
+      assert.ok(!([6, 8].includes(x) && [6, 8].includes(y)), '6/8 pegados');
     }
-    for (const v of b.vertices) assert.ok(v.adj.length >= 2 && v.adj.length <= 3);
   }
+});
+
+test('tablero grande (5 a 6): 30 terrenos, 2 desiertos, 28 fichas, 11 puertos y 34 cartas', () => {
+  for (let seed = 1; seed < 20; seed++) {
+    const b = buildBoard(rngFrom(seed), 5 + (seed % 2));
+    assert.equal(b.tiles.length, 30);
+    assert.deepEqual(count(b.tiles.map((t) => t.terrain)), { bosque: 6, pradera: 6, campo: 6, colina: 5, montana: 5, desierto: 2 });
+    assert.equal(b.tiles.filter((t) => t.number).length, 28);
+    assert.deepEqual(count(b.ports.map((p) => p.type)), { any: 5, madera: 1, ladrillo: 1, lana: 2, trigo: 1, piedra: 1 });
+  }
+  assert.equal(viewFor(mk(6), 0).deckCount, 34);
+  assert.equal(viewFor(mk(4), 0).deckCount, 25);
 });
 
 test('la preparación va en serpiente y el segundo rancho da recursos', () => {
@@ -137,7 +174,7 @@ test('partidas completas al azar terminan con un ganador válido', () => {
       const p = s.turn;
       const me = s.players[p];
       if (s.sub === 'roll') {
-        if (me.dev.includes('baqueano') && rng() < 0.3) must(s, p, { type: 'playCard', card: 'baqueano' }, rng);
+        if (me.dev.includes('baqueano') && !s.playedCard && rng() < 0.3) must(s, p, { type: 'playCard', card: 'baqueano' }, rng);
         else must(s, p, { type: 'roll' }, rng);
       } else if (s.sub === 'discard') {
         for (const [id, need] of Object.entries(s.discards)) {

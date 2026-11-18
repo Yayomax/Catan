@@ -1,7 +1,7 @@
 // Motor de reglas de Litoral. Puro y determinista dado un rng: lo usan el
 // servidor (autoridad) y el cliente (para resaltar jugadas válidas).
 
-import { buildBoard, RES, TERRAIN_RES, shuffle } from './board.js';
+import { buildBoard, layoutFor, RES, TERRAIN_RES, shuffle } from './board.js';
 
 export { RES, TERRAIN_RES };
 
@@ -15,13 +15,11 @@ export const LIMITS = { road: 15, settlement: 5, city: 4 };
 export const WIN_POINTS = 10;
 export const CARD_TYPES = ['baqueano', 'picada', 'cosecha', 'feria', 'fiesta'];
 
-const DECK = [
-  ...Array(14).fill('baqueano'),
-  ...Array(5).fill('fiesta'),
-  ...Array(2).fill('picada'),
-  ...Array(2).fill('cosecha'),
-  ...Array(2).fill('feria'),
-];
+// Mazo de cartas de oficio: base (25) y ampliada para 5 a 6 jugadores (34).
+const DECKS = {
+  base: { baqueano: 14, fiesta: 5, picada: 2, cosecha: 2, feria: 2 },
+  grande: { baqueano: 20, fiesta: 5, picada: 3, cosecha: 3, feria: 3 },
+};
 
 const zero = () => Object.fromEntries(RES.map((r) => [r, 0]));
 const total = (h) => RES.reduce((s, r) => s + (h[r] || 0), 0);
@@ -40,7 +38,8 @@ function cleanBundle(b) {
 
 export function createGame(players, rng = Math.random) {
   const n = players.length;
-  const board = buildBoard(rng);
+  const board = buildBoard(rng, n);
+  const deck = Object.entries(DECKS[layoutFor(n)]).flatMap(([c, k]) => Array(k).fill(c));
   const order = [...Array(n).keys()];
   return {
     gameId: Math.floor(rng() * 1e9),
@@ -67,7 +66,7 @@ export function createGame(players, rng = Math.random) {
     afterJaguar: 'main',
     buildings: {},
     roads: {},
-    deck: shuffle(DECK, rng),
+    deck: shuffle(deck, rng),
     discards: {},
     freeRoads: 0,
     playedCard: false,

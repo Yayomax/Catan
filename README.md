@@ -47,6 +47,15 @@ en curso. Tiene que correr una sola réplica.
 
 ## Reglas
 
+Tablero según la cantidad de jugadores, con las cantidades del juego original:
+
+| Jugadores | Terrenos | Fichas de número | Puertos | Cartas de oficio |
+| --- | --- | --- | --- | --- |
+| 2 a 4 | 19: 4 bosque, 4 pradera, 4 campo, 3 colina, 3 montaña, 1 desierto | 18, colocadas en espiral (orden A–R) desde una esquina al azar | 9: 4 de 3:1 y uno 2:1 por recurso | 25 |
+| 5 a 6 | 30: 6 bosque, 6 pradera, 6 campo, 5 colina, 5 montaña, 2 desiertos | 28, al azar | 11: 5 de 3:1 y 6 de 2:1 (2 de lana) | 34 |
+
+Los terrenos y el tipo de cada puerto se sortean en cada partida; un 6 y un 8 nunca quedan pegados.
+
 | Construcción | Costo | Efecto |
 | --- | --- | --- |
 | Camino | madera + ladrillo | Conecta. 5 o más seguidos: Picada larga (2 puntos) |
