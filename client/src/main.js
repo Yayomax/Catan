@@ -23,6 +23,7 @@ let mode = null; // 'road' | 'settlement' | 'city'
 let modal = null; // { kind, ...datos }
 let lastRoll = 0;
 let logOpen = false;
+let notice = '';
 let bankOpen = false;
 let lastFlowSeq = null;
 let pendingFlows = null;
@@ -98,11 +99,30 @@ function onMessage(m) {
     }
     if (!canUseMode()) mode = null;
   } else if (m.t === 'error') {
+    if (m.msg === 'No existe esa sala.') {
+      notice = 'Esa sala no existe. Puede que el servidor se haya reiniciado: pedile a quien la creó un link nuevo.';
+      $('screen').innerHTML = '';
+    }
     toast(m.msg);
+  } else if (m.t === 'hello') {
+    // Hay una versión nueva del juego: recargar para no quedar con la vieja.
+    const seen = sessionStorage.getItem('litoral.build');
+    if (seen && seen !== m.build && m.build !== 'dev') {
+      sessionStorage.setItem('litoral.build', m.build);
+      location.reload();
+      return;
+    }
+    sessionStorage.setItem('litoral.build', m.build);
   } else if (m.t === 'gone') {
+    const wasPlaying = !!(S || lobby || session.get());
     session.clear();
     lobby = null;
     S = null;
+    history.replaceState(null, '', location.pathname);
+    $('screen').innerHTML = '';
+    notice = wasPlaying
+      ? 'La sala se cerró porque el servidor se reinició (por ejemplo, por una actualización). Creá una sala nueva y volvé a pasar el link.'
+      : '';
   }
   render();
 }
@@ -242,6 +262,7 @@ function renderScreen() {
   el.innerHTML = `<div class="sheet">
     <h1>Litoral</h1>
     <p class="lead">Poblá la isla: juntá recursos, abrí caminos y comerciá con tus amigos.</p>
+    ${notice ? `<p class="notice">${esc(notice)}</p>` : ''}
     <label>Tu nombre<input id="name" maxlength="16" autocomplete="off" value="${esc(localStorage.getItem('litoral.name') || '')}" placeholder="Nombre" /></label>
     <button class="btn primary" data-act="create">Crear sala</button>
     <div class="or">o</div>

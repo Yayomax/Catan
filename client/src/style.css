@@ -273,3 +273,5 @@ small { font-size: 0.72em; }
   #bank.open { display: block; animation: drop 0.18s ease-out; }
   @keyframes drop { from { transform: translateY(-8px); opacity: 0; } }
 }
+
+.notice { background: #f9dfc9; border: 1px solid #c4553f; color: #7d2318; border-radius: 8px; padding: 8px 10px; font-size: 0.92rem; text-align: left; }

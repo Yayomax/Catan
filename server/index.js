@@ -44,19 +44,38 @@ const server = http.createServer((req, res) => {
     res.writeHead(403).end();
     return;
   }
-  if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(DIST, 'index.html');
+  const exists = fs.existsSync(file) && !fs.statSync(file).isDirectory();
+  // Un archivo que no existe (por ejemplo, de otra versión durante un deploy)
+  // es un 404: nunca la página, que un CDN podría guardar como si fuera el JS.
+  if (!exists && (url.startsWith('/assets/') || path.extname(url))) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end('No encontrado');
+    return;
+  }
+  if (!exists) file = path.join(DIST, 'index.html');
   fs.readFile(file, (e, data) => {
     if (e) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end('Falta compilar el cliente: npm run build');
       return;
     }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+    const hashed = file.includes(`${path.sep}assets${path.sep}`);
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+      // Los archivos con hash en el nombre no cambian nunca; la página siempre se revalida.
+      'Cache-Control': hashed ? 'public, max-age=31536000, immutable' : 'no-cache',
+    });
     res.end(data);
   });
 });
 
 const rooms = new Map();
+
+// Identifica la versión del cliente: si cambia, las pestañas abiertas se recargan.
+let BUILD = 'dev';
+try {
+  BUILD = crypto.createHash('sha1').update(fs.readFileSync(path.join(DIST, 'index.html'))).digest('hex').slice(0, 10);
+} catch {}
 
 function newCode() {
   const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -231,6 +250,7 @@ function handle(ws, m) {
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 
 wss.on('connection', (ws) => {
+  send(ws, { t: 'hello', build: BUILD });
   ws.alive = true;
   ws.on('pong', () => (ws.alive = true));
   ws.on('message', (raw) => {
