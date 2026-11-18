@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createGame, applyAction, viewFor, validSettlements, validRoads, validCities,
-  validJaguarTiles, stealCandidates, canAfford, bankRate, COSTS, RES, WIN_POINTS, timeoutTurn, turnKey, newFlows, timeoutStage, timerStage, bankCredits,
+  validJaguarTiles, stealCandidates, canAfford, bankRate, COSTS, RES, WIN_POINTS, timeoutTurn, turnKey, newFlows, timeoutStage, timerStage, bankCredits, piecesLeft, partnerOf,
 } from '../shared/game.js';
 import { buildBoard, spiralOrder } from '../shared/board.js';
 
@@ -193,6 +193,14 @@ test('partidas completas al azar terminan con un ganador válido', () => {
         const c = stealCandidates(s, tile, p);
         must(s, p, { type: 'moveJaguar', tile, victim: c.length ? pick(c) : undefined }, rng);
       } else {
+        // Con 5 o 6, el jugador 2 a veces construye algo antes.
+        if (s.partner && !s.partner.done && rng() < 0.5) {
+          const q = s.partner.id;
+          const qh = s.players[q].hand;
+          const qr = validRoads(s, q);
+          if (canAfford(qh, COSTS.road) && qr.length && piecesLeft(s, q).road > 0) must(s, q, { type: 'buildRoad', e: pick(qr) }, rng);
+          else must(s, q, { type: 'partnerDone' }, rng);
+        }
         if (s.freeRoads) {
           must(s, p, { type: 'buildRoad', e: pick(validRoads(s, p)) }, rng);
           continue;
@@ -221,6 +229,7 @@ test('partidas completas al azar terminan con un ganador válido', () => {
         }
         must(s, p, { type: 'endTurn' }, rng);
       }
+      if (s.sub === 'partner') must(s, s.partner.id, { type: 'partnerDone' }, rng);
       for (const pl of s.players) for (const r of RES) assert.ok(pl.hand[r] >= 0, 'mano negativa');
       const size = n > 4 ? 24 : 19;
       for (const r of RES) {
@@ -406,4 +415,43 @@ test('pre-timers: tirar los dados y descartar', () => {
   assert.deepEqual(s2.discards, {});
   assert.equal(s2.sub, 'jaguar', 'después del descarte, el jugador de turno mueve el ladrón');
   assert.equal(s2.players[1].hand.madera + s2.players[1].hand.ladrillo, 5);
+});
+
+test('turno compartido con 5 o 6 jugadores', () => {
+  const rng = rngFrom(71);
+  const s = mk(6, 71);
+  doSetup(s, rng);
+  assert.equal(s.partner.id, (s.turn - 3 + 6) % 6);
+  const p1 = s.turn;
+  const p2 = s.partner.id;
+  // Antes de tirar, el jugador 2 no puede hacer nada.
+  s.players[p2].hand = { madera: 2, ladrillo: 2, lana: 0, trigo: 0, piedra: 4 };
+  for (const r of RES) s.bank[r] -= s.players[p2].hand[r];
+  assert.ok(applyAction(s, p2, { type: 'buildRoad', e: validRoads(s, p2)[0] }, rng).error);
+  must(s, p1, { type: 'roll' }, () => 0.2);
+  // Después de la tirada: construye y cambia con el banco, pero no comercia con jugadores ni juega cartas.
+  must(s, p2, { type: 'buildRoad', e: validRoads(s, p2)[0] }, rng);
+  const rate = bankRate(s, p2, 'piedra');
+  if (s.players[p2].hand.piedra >= rate) must(s, p2, { type: 'bankTrade', give: { piedra: rate }, get: { lana: 1 } }, rng);
+  assert.ok(applyAction(s, p2, { type: 'offerTrade', give: { madera: 1 }, get: { trigo: 1 } }, rng).error);
+  s.players[p2].dev = ['cosecha'];
+  assert.ok(applyAction(s, p2, { type: 'playCard', card: 'cosecha', a: 'lana', b: 'lana' }, rng).error);
+  // El jugador 1 termina, pero el turno sigue hasta que termine el 2.
+  must(s, p1, { type: 'endTurn' }, rng);
+  assert.equal(s.turn, p1);
+  assert.equal(s.sub, 'partner');
+  assert.ok(applyAction(s, p1, { type: 'buyCard' }, rng).error);
+  must(s, p2, { type: 'partnerDone' }, rng);
+  assert.equal(s.turn, (p1 + 1) % 6);
+  assert.equal(s.partner.id, (s.turn - 3 + 6) % 6);
+  assert.equal(s.partner.done, false);
+  // Si se acaba el tiempo con el jugador 2 pendiente, el turno pasa igual.
+  const t = s.turn;
+  timeoutTurn(s, rng);
+  assert.notEqual(s.turn, t);
+  // Con 4 o menos no hay turno compartido.
+  const g = mk(4, 72);
+  doSetup(g, rng);
+  assert.equal(g.partner, null);
+  assert.equal(partnerOf(g), null);
 });

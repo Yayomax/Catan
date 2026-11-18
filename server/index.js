@@ -306,7 +306,8 @@ function handle(ws, m) {
     if (!room.game) return fail('La partida no empezó.');
     if (room.paused) return fail(`La partida está en pausa (la pausó ${room.paused.name}).`);
     const g = room.game;
-    const wasTurn = g.turn === ws.index && g.phase === 'play';
+    // El jugador de turno y el del turno compartido suman tiempo para los dos.
+    const wasTurn = (g.turn === ws.index || g.partner?.id === ws.index) && g.phase === 'play';
     newFlows(g);
     const r = applyAction(g, ws.index, m.a);
     if (r.error) return fail(r.error);

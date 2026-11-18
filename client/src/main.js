@@ -30,7 +30,7 @@ let lastRoll = 0;
 let logOpen = false;
 let menuOpen = false;
 let paused = null; // { by, name } si la partida está en pausa
-const prefs = { sound: true, volume: 0.7, ticks: true, anim: true, ...JSON.parse(localStorage.getItem('litoral.prefs') || '{}') };
+const prefs = { sound: true, volume: 0.7, ticks: true, anim: true, vibrate: true, ...JSON.parse(localStorage.getItem('litoral.prefs') || '{}') };
 setSoundSettings(prefs);
 const savePrefs = () => {
   localStorage.setItem('litoral.prefs', JSON.stringify(prefs));
@@ -129,7 +129,7 @@ function onMessage(m) {
       }
     }
     if (!canUseMode()) mode = null;
-    if (!inMain()) {
+    if (!canAct()) {
       tradeDraft = null;
       confirmBuild = null;
     }
@@ -161,13 +161,18 @@ function onMessage(m) {
     }
     sessionStorage.setItem('litoral.build', m.build);
   } else if (m.t === 'gone') {
-    const wasPlaying = !!(S || lobby || session.get());
+    // La sesión guardada era de una sala que ya no existe. Si entraste con el
+    // link de otra sala, ese código se respeta: es a la que te invitaron.
+    const old = session.get();
+    const invite = new URLSearchParams(location.search).get('sala');
+    const sameRoom = !invite || (old && invite.toUpperCase() === old.code);
+    const wasPlaying = !!(S || lobby || old);
     session.clear();
     lobby = null;
     S = null;
-    history.replaceState(null, '', location.pathname);
+    if (sameRoom) history.replaceState(null, '', location.pathname);
     $('screen').innerHTML = '';
-    notice = wasPlaying
+    notice = wasPlaying && sameRoom
       ? 'La sala se cerró porque el servidor se reinició (por ejemplo, por una actualización). Creá una sala nueva y volvé a pasar el link.'
       : '';
   }
@@ -202,17 +207,44 @@ function soundsFor(a, b) {
   if (traded && b.rollId === a.rollId) play('trade');
   if (b.discards[you] && !a.discards[you]) setTimeout(() => play('alert'), 900);
   const turnChanged = b.turn !== a.turn || (b.phase === 'play' && a.phase === 'setup');
-  if (turnChanged) setTimeout(() => play(b.turn === you ? 'yourTurn' : 'turn'), 150);
+  const mineNow = b.turn === you || (b.partner && b.partner.id === you && b.phase === 'play');
+  if (turnChanged) {
+    setTimeout(() => play(mineNow ? 'yourTurn' : 'turn'), 150);
+    if (mineNow) notifyTurn(b.turn === you ? '¡Tu turno!' : '¡Podés construir!');
+  }
+  if (b.discards[you] && !a.discards[you]) notifyTurn('¡Descartá!');
 }
+
+// Si estás en otra pestaña, el título parpadea; en el celu, vibra.
+const baseTitle = document.title;
+let titleTimer = null;
+function notifyTurn(text) {
+  if (prefs.vibrate && navigator.vibrate) navigator.vibrate([120, 70, 120]);
+  if (!document.hidden) return;
+  clearInterval(titleTimer);
+  let on = false;
+  titleTimer = setInterval(() => {
+    on = !on;
+    document.title = on ? `🔔 ${text}` : baseTitle;
+  }, 900);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  clearInterval(titleTimer);
+  document.title = baseTitle;
+});
 
 // ---------- Ayudas de estado ----------
 
 const me = () => S.players[you];
 const myTurn = () => S && S.turn === you && S.phase !== 'ended';
 const inMain = () => myTurn() && S.phase === 'play' && S.sub === 'main' && !S.freeRoads;
+// Con 5 o 6 jugadores: sos el jugador 2 del turno compartido (solo construir y banco).
+const asPartner = () => !!(S && S.phase === 'play' && S.partner && S.partner.id === you && !S.partner.done && (S.sub === 'main' || S.sub === 'partner'));
+const canAct = () => inMain() || asPartner();
 
 function canBuild(kind) {
-  if (!inMain()) return false;
+  if (!canAct()) return false;
   const left = piecesLeft(S, you);
   if (kind === 'road') return left.road > 0 && canAfford(me().hand, COSTS.road) && validRoads(S, you).length > 0;
   if (kind === 'settlement') return left.settlement > 0 && canAfford(me().hand, COSTS.settlement) && validSettlements(S, you).length > 0;
@@ -229,7 +261,16 @@ function statusText() {
     return S.sub === 'settlement' ? 'Tocá una esquina para construir tu pueblo' : 'Ahora tocá un borde para tu carretera';
   }
   if (S.sub === 'discard') return 'Salió 7: esperando los descartes';
-  if (!myTurn()) return S.sub === 'roll' ? `Turno de ${name}: tirando los dados` : `Turno de ${name} · salió ${S.dice[0] + S.dice[1]}`;
+  const p2 = S.partner ? esc(S.players[S.partner.id].name) : '';
+  if (asPartner()) {
+    if (confirmBuild) return 'Confirmá la construcción';
+    return `Turno compartido con ${name}: podés construir y cambiar con el banco`;
+  }
+  if (!myTurn()) {
+    if (S.sub === 'roll') return `Turno de ${name}: tirando los dados`;
+    return `Turno de ${name}${S.partner && !S.partner.done ? ` · construye también ${p2}` : ''} · salió ${S.dice[0] + S.dice[1]}`;
+  }
+  if (S.sub === 'partner') return `Esperando a que ${p2} termine de construir`;
   if (S.sub === 'roll') return 'Tu turno: tirá los dados';
   if (S.sub === 'jaguar') return 'Tocá un terreno para mover el ladrón';
   if (S.freeRoads) return `Construcción de carreteras: colocá ${S.freeRoads} gratis`;
@@ -241,7 +282,7 @@ function statusText() {
 }
 
 function updateHighlights() {
-  if (!S || !myTurn() || S.discards[you]) return scene.setHighlights(null);
+  if (!S || S.discards[you] || (!myTurn() && !asPartner())) return scene.setHighlights(null);
   if (S.phase === 'setup') {
     if (S.sub === 'settlement') return scene.setHighlights('vertex', validSettlements(S, you), (v) => act({ type: 'buildSettlement', v }));
     return scene.setHighlights('edge', validRoads(S, you), (e) => act({ type: 'buildRoad', e }));
@@ -255,8 +296,8 @@ function updateHighlights() {
       } else act({ type: 'moveJaguar', tile });
     });
   }
-  if (S.sub !== 'main') return scene.setHighlights(null);
-  if (S.freeRoads || mode === 'road') return scene.setHighlights('edge', validRoads(S, you), (e) => act({ type: 'buildRoad', e }));
+  if (S.sub !== 'main' && !asPartner()) return scene.setHighlights(null);
+  if ((myTurn() && S.freeRoads) || mode === 'road') return scene.setHighlights('edge', validRoads(S, you), (e) => act({ type: 'buildRoad', e }));
   if (mode === 'settlement') return scene.setHighlights('vertex', validSettlements(S, you), (v) => act({ type: 'buildSettlement', v }));
   if (mode === 'city') return scene.setHighlights('city', validCities(S, you), (v) => act({ type: 'buildCity', v }));
   if (confirmBuild) return scene.setHighlights([{ kind: KIND_OF[confirmBuild.kind], ids: [confirmBuild.id], onPick: () => ACT.confirmBuild() }]);
@@ -377,13 +418,24 @@ function renderScreen() {
     <p class="lead">Poblá la isla: juntá recursos, construí carreteras y comerciá con tus amigos.</p>
     ${notice ? `<p class="notice">${esc(notice)}</p>` : ''}
     <label>Tu nombre<input id="name" maxlength="16" autocomplete="off" value="${esc(localStorage.getItem('litoral.name') || '')}" placeholder="Nombre" /></label>
-    <button class="btn primary" data-act="create">Crear sala</button>
-    <div class="or">o</div>
-    <label>Código de sala<input id="code" maxlength="4" autocomplete="off" autocapitalize="characters" value="${esc(urlCode)}" placeholder="ABCD" /></label>
-    <button class="btn" data-act="join">Unirme</button>
+    ${urlCode
+      ? `<div class="invite">Te invitaron a la sala <b>${esc(urlCode.toUpperCase())}</b></div>
+         <input id="code" type="hidden" value="${esc(urlCode)}" />
+         <button class="btn primary big" data-act="join">Unirme a la sala ${esc(urlCode.toUpperCase())}</button>
+         <button class="btn link" data-act="newRoom">No, quiero crear mi propia sala</button>`
+      : `<button class="btn primary" data-act="create">Crear sala</button>
+         <div class="or">o</div>
+         <label>Código de sala<input id="code" maxlength="4" autocomplete="off" autocapitalize="characters" placeholder="ABCD" /></label>
+         <button class="btn" data-act="join">Unirme</button>`}
     ${offline}
   </div>`;
 }
+
+// Colores claros (como el blanco) llevan la letra oscura.
+const isLight = (hex) => {
+  const n = parseInt(hex.slice(1), 16);
+  return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) > 170;
+};
 
 function renderPlayers() {
   $('players').innerHTML =
@@ -391,9 +443,10 @@ function renderPlayers() {
       .map((p) => {
         const turn = S.turn === p.id && S.phase !== 'ended';
         const award = (on) => (on ? 'award' : '');
-        return `<div class="player ${turn ? 'turn' : ''} ${online[p.id] ? '' : 'off'}" data-pid="${p.id}" style="--c:${p.color}">
+        const pairing = S.phase === 'play' && S.partner && S.partner.id === p.id && !S.partner.done;
+        return `<div class="player ${turn ? 'turn' : ''} ${pairing ? 'pair' : ''} ${online[p.id] ? '' : 'off'}" data-pid="${p.id}" style="--c:${p.color}">
           <div class="who">
-            <span class="avatar">${esc(p.name.slice(0, 1).toUpperCase())}</span>
+            <span class="avatar ${isLight(p.color) ? 'light' : ''}">${esc(p.name.slice(0, 1).toUpperCase())}</span>
             <b>${esc(p.name)}</b>${p.id === you ? '<em>vos</em>' : ''}${online[p.id] ? '' : '<em class="offline">desconectado</em>'}
             <span class="vp" title="${p.realPoints !== undefined && p.realPoints !== p.points ? `Los demás ven ${p.points}; con tus puntos de victoria ocultos tenés ${p.realPoints}` : 'Puntos de victoria'}">${UI.vp}${p.points}${p.realPoints !== undefined && p.realPoints !== p.points ? `<small class="real">(${p.realPoints})</small>` : ''}</span>
           </div>
@@ -404,6 +457,7 @@ function renderPlayers() {
             <span class="b ${award(S.longest === p.id)}" title="Carretera más larga${S.longest === p.id ? ' · Gran Ruta Comercial (+2)' : ''}">${UI.road}<b>${p.roadLen}</b></span>
           </div>
           ${turn ? `<div class="turnline">${p.id === you ? 'Tu turno' : 'Su turno'} <b class="clockv"></b></div>` : ''}
+          ${S.phase === 'play' && S.partner && S.partner.id === p.id && !S.partner.done ? `<div class="turnline partnerline">${p.id === you ? 'Construís también' : 'Construye también'} <b class="clockv"></b></div>` : ''}
         </div>`;
       })
       .join('') +
@@ -490,7 +544,7 @@ function renderBottom() {
   handEl.title = total > 7 ? `Tenés ${total} cartas: si sale un 7, perdés la mitad.` : '';
   handEl.innerHTML = RES.map((r) => {
     const n = Math.max(0, hand[r] - incoming[r]);
-    const tappable = inMain() && hand[r] > (tradeDraft ? tradeDraft.give[r] : 0);
+    const tappable = canAct() && hand[r] > (tradeDraft ? tradeDraft.give[r] : 0);
     return `<div class="card ${n ? '' : 'empty'} ${tappable ? 'tap' : ''}" data-r="${r}" ${tappable ? `data-act="handCard"` : ''} style="--c:${RES_INFO[r].color}">
       ${icon(r)}<span class="n">${n}</span><small>${RES_INFO[r].label}</small></div>`;
   }).join('') + (total > 7 && S.phase === 'play' ? `<div class="warn">${total} cartas: ¡cuidado con el 7!</div>` : '');
@@ -503,9 +557,18 @@ function renderBottom() {
     const b = (kind, label) =>
       `<button class="btn build ${mode === kind ? 'active' : ''}" data-act="mode" data-m="${kind}" ${canBuild(kind) ? '' : 'disabled'}>
         <span>${label}</span>${costRow(COSTS[kind])}</button>`;
-    html = `${b('road', 'Carretera')}${b('settlement', 'Pueblo')}${b('city', 'Ciudad')}
-      <button class="btn ${tradeDraft ? 'active' : ''}" data-act="trade" ${inMain() ? '' : 'disabled'}>${UI.trade}<span>Comerciar</span></button>
-      <button class="btn primary" data-act="end" ${inMain() ? '' : 'disabled'}>Terminar turno</button>`;
+    const builds = `${b('road', 'Carretera')}${b('settlement', 'Pueblo')}${b('city', 'Ciudad')}`;
+    if (asPartner()) {
+      html = `${builds}
+        <button class="btn ${tradeDraft ? 'active' : ''}" data-act="trade">${UI.bank}<span>Banco</span></button>
+        <button class="btn primary" data-act="partnerDone">Terminar</button>`;
+    } else if (myTurn() && S.sub === 'partner') {
+      html = `${builds}<button class="btn" disabled>Esperando a ${esc(S.players[S.partner.id].name)}…</button>`;
+    } else {
+      html = `${builds}
+        <button class="btn ${tradeDraft ? 'active' : ''}" data-act="trade" ${inMain() ? '' : 'disabled'}>${UI.trade}<span>Comerciar</span></button>
+        <button class="btn primary" data-act="end" ${inMain() ? '' : 'disabled'}>Terminar turno</button>`;
+    }
   }
   const cards = S.phase === 'play' ? `<button class="btn" data-act="cards">${UI.dev}<span>Desarrollo</span> <b>${me().dev.length + me().newDev.length}</b></button>` : '';
   $('actions').innerHTML = dice + html + cards;
@@ -520,7 +583,7 @@ function composerHTML() {
   const want = sum(get);
   const bankStock = !S.bank || RES.every((r) => S.bank[r] >= get[r]);
   const bankOk = g.length && w.length && !overlap && credits > 0 && credits === want && bankStock;
-  const offerOk = g.length && w.length && !overlap && !S.trade;
+  const offerOk = g.length && w.length && !overlap && !S.trade && inMain();
   let hint = 'Tocá tus cartas para ofrecerlas y elegí arriba qué querés recibir.';
   if (g.length && credits < 0) hint = `Con el banco se cambia de a ${g.map((r) => `${bankRate(S, you, r)} ${RES_INFO[r].label.toLowerCase()}`).join(', ')}.`;
   else if (g.length && credits >= 0 && credits !== want) hint = `Con el banco, lo que das vale ${credits} carta${credits === 1 ? '' : 's'}.`;
@@ -537,7 +600,7 @@ function composerHTML() {
     <div class="trow"><span class="lbl">Das</span><div class="tgive">${chip(give, 'give') || '<span class="muted">Tocá tus cartas abajo</span>'}</div></div>
     <div class="trow tacts"><small class="hint">${hint}</small>
       <button class="btn small" data-act="bankTrade" ${bankOk ? '' : 'disabled'}>${UI.bank}<span>Banco</span></button>
-      <button class="btn primary small" data-act="offer" ${offerOk ? '' : 'disabled'}>Ofrecer a jugadores</button></div>
+      ${asPartner() ? '' : `<button class="btn primary small" data-act="offer" ${offerOk ? '' : 'disabled'}>Ofrecer a jugadores</button>`}</div>
   </div>`;
 }
 
@@ -630,7 +693,7 @@ function modalHTML() {
           ${c === 'fiesta' ? '' : `<button class="btn small" data-act="play" data-c="${c}" ${playable ? '' : 'disabled'}>Jugar</button>`}</li>`;
       })
       .join('');
-    const canBuy = inMain() && S.deckCount > 0 && canAfford(p.hand, COSTS.card);
+    const canBuy = canAct() && S.deckCount > 0 && canAfford(p.hand, COSTS.card);
     return `${close}<h2>Cartas de desarrollo</h2>
       <ul class="devlist">${rows || '<li class="muted">Todavía no tenés ninguna.</li>'}</ul>
       <button class="btn primary build" data-act="buy" ${canBuy ? '' : 'disabled'}><span>Comprar carta</span>${costRow(COSTS.card)}</button>
@@ -665,6 +728,7 @@ function modalHTML() {
         <label class="slider"><span><b>Volumen</b></span><input type="range" min="0" max="1" step="0.05" value="${prefs.volume}" data-pref="volume" ${prefs.sound ? '' : 'disabled'} /></label>
         ${toggle('ticks', 'Tic-tac del reloj', 'Suena en los últimos 10 segundos de tu turno.')}
         ${toggle('anim', 'Animación de cartas', 'Las cartas vuelan entre el banco, tu mano y los jugadores.')}
+        ${toggle('vibrate', 'Vibrar en tu turno', 'En el celu. Si estás en otra pestaña, el título avisa igual.')}
       </div>
       <button class="btn" data-act="testSound">Probar sonido</button>`;
   }
@@ -876,6 +940,11 @@ const ACT = {
     ws.close();
   },
   start: () => send({ t: 'start' }),
+  newRoom: () => {
+    history.replaceState(null, '', location.pathname);
+    $('screen').innerHTML = '';
+    render();
+  },
   ready: (d) => send({ t: 'ready', v: d.v === '1' }),
   setTime: (d) => send({ t: 'settings', turnSeconds: Number(d.n) }),
   setBank: (d) => send({ t: 'settings', showBank: d.v === '1' }),
@@ -913,7 +982,7 @@ const ACT = {
     render();
   },
   handCard: (d) => {
-    if (!inMain()) return;
+    if (!canAct()) return;
     mode = null;
     confirmBuild = null;
     if (!tradeDraft) tradeDraft = { give: zero(), get: zero() };
@@ -934,6 +1003,12 @@ const ACT = {
     act({ type: 'bankTrade', give: tradeDraft.give, get: tradeDraft.get });
     tradeDraft = null;
     render();
+  },
+  partnerDone: () => {
+    mode = null;
+    tradeDraft = null;
+    confirmBuild = null;
+    act({ type: 'partnerDone' });
   },
   confirmBuild: () => {
     if (!confirmBuild) return;
@@ -1107,7 +1182,7 @@ document.addEventListener('submit', (ev) => {
   input.value = '';
 });
 document.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Enter' && ev.target.id === 'name') ACT[$('code').value ? 'join' : 'create']();
+  if (ev.key === 'Enter' && ev.target.id === 'name') ACT[$('code')?.value ? 'join' : 'create']();
   if (ev.key === 'Enter' && ev.target.id === 'code') ACT.join();
   if (ev.key === 'Escape' && confirmBuild) ACT.cancelBuild();
   else if (ev.key === 'Escape' && modal && !['steal', 'discard'].includes(modal.kind)) closeModal();
@@ -1139,7 +1214,7 @@ function tickClock() {
   });
   if (lastLeft !== null && left > lastLeft + 3 && left < Math.round(timer.total / 1000)) flashUntil = Date.now() + 900;
   lastLeft = left;
-  const mineNow = S.phase !== 'ended' && ((S.turn === you && !S.discards[you] && timer.stage !== 'discard') || (S.discards[you] && timer.stage === 'discard'));
+  const mineNow = S.phase !== 'ended' && (((S.turn === you && S.sub !== 'partner') || asPartner()) && !S.discards[you] && timer.stage !== 'discard' || (S.discards[you] && timer.stage === 'discard'));
   if (prefs.ticks && mineNow && left <= 10 && left > 0 && left !== lastTick) play('tick', left <= 3);
   lastTick = left;
   const who = S.players[S.turn];

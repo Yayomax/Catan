@@ -71,6 +71,7 @@ export function createGame(players, rng = Math.random) {
     deck: shuffle(deck, rng),
     flows: [],
     flowSeq: 0,
+    partner: null,
     bank: Object.fromEntries(RES.map((r) => [r, BANK_SIZE[layoutFor(n)]])),
     discards: {},
     freeRoads: 0,
@@ -317,7 +318,9 @@ export function applyAction(state, pid, a, rng = Math.random) {
   if (a.type === 'discard') return discard(state, me, a);
   if (a.type === 'respondTrade') return respondTrade(state, me, a);
 
+  if (state.partner && state.partner.id === pid && pid !== state.turn) return partnerAction(state, me, a, rng);
   if (state.turn !== pid) return err('No es tu turno.');
+  if (state.sub === 'partner') return err(`Esperá a que termine ${state.players[state.partner.id].name}.`);
   const result = turnAction(state, me, a, rng);
   if (result.ok) checkWin(state);
   return result;
@@ -341,6 +344,59 @@ function respondTrade(state, me, a) {
   if (a.accept && !canAfford(me.hand, t.get)) return err('No tenés esas cartas.');
   t.responses[me.id] = a.accept ? 'accept' : 'reject';
   return OK;
+}
+
+// ---------- Turno compartido (5 o 6 jugadores) ----------
+// En cada turno, el jugador que está 3 lugares a la derecha del que tiene el
+// turno (3 para atrás en el orden de juego) puede construir y cambiar con el
+// banco al mismo tiempo, desde que se tiran los dados.
+
+export function partnerOf(state) {
+  const n = state.players.length;
+  return n >= 5 ? (state.turn - 3 + n) % n : null;
+}
+
+function startTurn(state) {
+  state.partner = state.players.length >= 5 ? { id: partnerOf(state), done: false } : null;
+}
+
+function passTurn(state) {
+  // Las cartas compradas en este turno se pueden jugar desde el próximo.
+  for (const p of state.players) {
+    p.dev.push(...p.newDev);
+    p.newDev = [];
+  }
+  state.freeRoads = 0;
+  state.playedCard = false;
+  state.trade = null;
+  state.turn = (state.turn + 1) % state.players.length;
+  state.turnCount++;
+  state.sub = 'roll';
+  startTurn(state);
+}
+
+const PARTNER_ACTIONS = new Set(['buildRoad', 'buildSettlement', 'buildCity', 'buyCard', 'bankTrade']);
+
+function partnerAction(state, me, a, rng) {
+  const part = state.partner;
+  if (state.phase !== 'play') return err('Ahora no.');
+  if (part.done) return err('Ya terminaste tu parte de este turno.');
+  if (state.sub !== 'main' && state.sub !== 'partner') return err('Esperá a que se tiren los dados.');
+  if (a.type === 'partnerDone') {
+    part.done = true;
+    say(state, `${me.name} terminó de construir.`);
+    if (state.sub === 'partner') passTurn(state);
+    return OK;
+  }
+  if (!PARTNER_ACTIONS.has(a.type)) return err('En el turno compartido solo podés construir o cambiar con el banco.');
+  // Se usan las mismas reglas que en un turno normal, sin tocar el estado del jugador 1.
+  const saved = { sub: state.sub, freeRoads: state.freeRoads };
+  state.sub = 'main';
+  state.freeRoads = 0;
+  const r = turnAction(state, me, a, rng);
+  state.sub = saved.sub;
+  state.freeRoads = saved.freeRoads;
+  return r;
 }
 
 function turnAction(state, me, a, rng) {
@@ -376,6 +432,7 @@ function turnAction(state, me, a, rng) {
         state.sub = 'roll';
         state.turn = 0;
         state.turnCount = 1;
+        startTurn(state);
         say(state, 'La isla está poblada. ¡A tirar los dados!');
       }
       return OK;
@@ -581,14 +638,15 @@ function turnAction(state, me, a, rng) {
 
     case 'endTurn': {
       if (state.sub !== 'main') return err('Todavía no podés terminar.');
-      me.dev.push(...me.newDev);
-      me.newDev = [];
       state.freeRoads = 0;
-      state.playedCard = false;
       state.trade = null;
-      state.turn = (state.turn + 1) % state.players.length;
-      state.turnCount++;
-      state.sub = 'roll';
+      if (state.partner && !state.partner.done) {
+        // Con 5 o 6 jugadores, el turno sigue hasta que termine el jugador 2.
+        state.sub = 'partner';
+        say(state, `${me.name} terminó. Falta que termine ${state.players[state.partner.id].name}.`);
+        return OK;
+      }
+      passTurn(state);
       return OK;
     }
   }
@@ -652,6 +710,8 @@ export function timeoutTurn(state, rng = Math.random) {
       const tile = pick(validJaguarTiles(state));
       const cands = stealCandidates(state, tile, pid);
       applyAction(state, pid, { type: 'moveJaguar', tile, victim: cands.length ? pick(cands) : undefined }, rng);
+    } else if (state.sub === 'partner') {
+      applyAction(state, state.partner.id, { type: 'partnerDone' }, rng);
     } else {
       applyAction(state, pid, { type: 'endTurn' }, rng);
     }

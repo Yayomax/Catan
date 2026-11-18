@@ -492,3 +492,12 @@ small { font-size: 0.72em; }
   .kcard .ico { width: 28px; height: 28px; }
   .kcard b { font-size: 1.5rem; }
 }
+
+/* ---------- Turno compartido ---------- */
+.player.pair { opacity: 1; border-color: #7ec0e0; box-shadow: 0 0 0 1px #7ec0e0, 0 4px 14px #000a; }
+.turnline.partnerline { color: #9fd6f0; }
+
+.invite { padding: 10px 12px; border-radius: 10px; background: #fff8; border: 1px dashed var(--wood-edge); font-size: 1.05rem; }
+.invite b { letter-spacing: 0.15em; }
+
+.avatar.light { color: #2b1a10; text-shadow: none; border-color: #8a6234; }
