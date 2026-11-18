@@ -7,12 +7,17 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { createGame, applyAction, viewFor } from '../shared/game.js';
+import { createGame, applyAction, viewFor, timeoutTurn, turnKey } from '../shared/game.js';
 
 const PORT = Number(process.env.PORT) || 3001;
 const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 const COLORS = ['#c8402f', '#2f6fb5', '#e3a21a', '#ece6d6', '#3c9a5f', '#8456b0'];
 const MAX_PLAYERS = 6;
+const TURN_OPTIONS = [0, 30, 60, 90, 120, 180]; // segundos; 0 = sin límite
+const BONUS_MS = 10000;
+const BONUS_ACTIONS = new Set(['buildRoad', 'buildSettlement', 'buildCity', 'buyCard', 'playCard', 'bankTrade', 'offerTrade', 'acceptTrade']);
+// Solo para pruebas automáticas: permite turnos cortos.
+if (process.env.LITORAL_TEST_TIMERS) TURN_OPTIONS.push(4, 15);
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript',
@@ -74,6 +79,7 @@ function broadcast(room) {
         code: room.code,
         you: i,
         players: room.players.map((q, k) => ({ name: q.name, color: q.color, online: !!q.ws, ready: k === 0 || q.ready })),
+        settings: room.settings,
       });
       return;
     }
@@ -84,9 +90,51 @@ function broadcast(room) {
       code: room.code,
       you: i,
       online: room.players.map((q) => !!q.ws),
+      settings: room.settings,
+      timer: room.deadline ? { deadline: room.deadline, total: room.settings.turnSeconds * 1000 } : null,
+      now: Date.now(),
       s: viewFor(room.game, i, withBoard),
     });
   });
+}
+
+// ---------- Reloj de turno ----------
+
+function schedule(room) {
+  clearTimeout(room.timer);
+  room.timer = null;
+  const g = room.game;
+  const secs = room.settings.turnSeconds;
+  if (!g || !secs || g.phase === 'ended') {
+    room.deadline = null;
+    room.turnKey = null;
+    return;
+  }
+  const key = turnKey(g);
+  if (key !== room.turnKey || !room.deadline) {
+    room.turnKey = key;
+    room.deadline = Date.now() + secs * 1000;
+  }
+  // Con nadie conectado, el reloj se detiene; arranca de nuevo al volver alguien.
+  if (!room.players.some((p) => p.ws)) {
+    room.deadline = null;
+    return;
+  }
+  room.timer = setTimeout(() => onTimeout(room), Math.max(0, room.deadline - Date.now()));
+}
+
+function onTimeout(room) {
+  room.timer = null;
+  if (!room.game || room.game.phase === 'ended') return;
+  timeoutTurn(room.game);
+  schedule(room);
+  broadcast(room);
+}
+
+function addBonus(room) {
+  const secs = room.settings.turnSeconds;
+  if (!room.deadline || !secs) return;
+  room.deadline = Math.min(room.deadline + BONUS_MS, Date.now() + secs * 1000);
 }
 
 function attach(ws, room, index) {
@@ -97,6 +145,7 @@ function attach(ws, room, index) {
   ws.index = index;
   ws.boardFor = null;
   send(ws, { t: 'joined', code: room.code, token: p.token });
+  if (room.game && !room.timer) schedule(room);
   broadcast(room);
 }
 
@@ -106,7 +155,7 @@ function handle(ws, m) {
   if (m.t === 'create' || m.t === 'join') {
     let room;
     if (m.t === 'create') {
-      room = { code: newCode(), players: [], game: null, touched: Date.now() };
+      room = { code: newCode(), players: [], game: null, touched: Date.now(), settings: { turnSeconds: 0 }, timer: null, deadline: null, turnKey: null };
       rooms.set(room.code, room);
     } else {
       room = rooms.get(String(m.code || '').toUpperCase());
@@ -135,6 +184,15 @@ function handle(ws, m) {
   const room = ws.room;
   if (!room) return fail('No estás en una sala.');
 
+  if (m.t === 'settings') {
+    if (ws.index !== 0) return fail('Solo quien creó la sala cambia la configuración.');
+    if (room.game && room.game.phase !== 'ended') return fail('La partida ya empezó.');
+    const secs = Number(m.turnSeconds);
+    if (!TURN_OPTIONS.includes(secs)) return fail('Tiempo inválido.');
+    room.settings.turnSeconds = secs;
+    return broadcast(room);
+  }
+
   if (m.t === 'ready') {
     if (room.game) return;
     room.players[ws.index].ready = !!m.v;
@@ -147,13 +205,20 @@ function handle(ws, m) {
     if (room.players.length < 2) return fail('Hacen falta al menos 2 jugadores.');
     if (!room.game && room.players.some((p, k) => k > 0 && !p.ready)) return fail('Todavía no están todos listos.');
     room.game = createGame(room.players);
+    room.turnKey = null;
+    room.deadline = null;
+    schedule(room);
     return broadcast(room);
   }
 
   if (m.t === 'act') {
     if (!room.game) return fail('La partida no empezó.');
-    const r = applyAction(room.game, ws.index, m.a);
+    const g = room.game;
+    const wasTurn = g.turn === ws.index && g.phase === 'play';
+    const r = applyAction(g, ws.index, m.a);
     if (r.error) return fail(r.error);
+    if (wasTurn && m.a && BONUS_ACTIONS.has(m.a.type)) addBonus(room);
+    schedule(room);
     return broadcast(room);
   }
 }
@@ -187,6 +252,7 @@ wss.on('connection', (ws) => {
       // En la sala de espera, quien se va libera su lugar.
       if (!room.game && ws.index !== 0) room.players.splice(ws.index, 1);
       room.players.forEach((q, i) => q.ws && (q.ws.index = i));
+      if (room.game && !room.players.some((q) => q.ws)) schedule(room);
       broadcast(room);
     }
   });
@@ -202,7 +268,10 @@ setInterval(() => {
   }
   // Salas vacías por más de 2 horas se descartan.
   for (const [code, room] of rooms) {
-    if (!room.players.some((p) => p.ws) && Date.now() - room.touched > 2 * 3600 * 1000) rooms.delete(code);
+    if (!room.players.some((p) => p.ws) && Date.now() - room.touched > 2 * 3600 * 1000) {
+      clearTimeout(room.timer);
+      rooms.delete(code);
+    }
   }
 }, 30000);
 

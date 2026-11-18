@@ -83,6 +83,7 @@ small { font-size: 0.72em; }
 .ico svg { width: 100%; height: 100%; }
 
 #bottom {
+  position: relative;
   grid-row: 5; display: flex; gap: 12px; align-items: stretch; justify-content: space-between;
   padding: 10px 12px calc(10px + var(--safe-b));
   background: linear-gradient(#2e1c11f2, #1c100a); border-top: 2px solid var(--wood-edge); box-shadow: 0 -6px 20px #0007;
@@ -211,3 +212,23 @@ small { font-size: 0.72em; }
 .rdy.on { background: #3f8a4a; color: #fff; }
 .roster li em + .rdy, .roster li .rdy { margin-left: auto; }
 .roster em { margin-left: 4px; }
+
+#clock { margin-left: 10px; padding: 1px 9px; border-radius: 99px; background: #0003; font-variant-numeric: tabular-nums; }
+#clock:empty { display: none; }
+#clock.low { background: #b3261e; color: #fff; animation: clockPulse 1s infinite; }
+@keyframes clockPulse { 50% { opacity: 0.6; } }
+.setting { display: grid; gap: 6px; text-align: left; padding: 8px 0 2px; }
+.setting > span { font-size: 0.85rem; color: var(--muted); }
+.setting small { color: var(--muted); font-size: 0.78rem; }
+.opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.opt { border: 1px solid #b79f6c; background: #fff8; border-radius: 99px; padding: 6px 12px; cursor: pointer; font-size: 0.9rem; }
+.opt.on { background: var(--wood-2); color: var(--paper); border-color: var(--wood-edge); }
+
+#timebar { display: none; position: absolute; left: 0; right: 0; top: -14px; height: 12px; background: #1c100acc; border-top: 1px solid #5b3d20; }
+#timebar.show { display: block; }
+#timebar i { display: block; height: 100%; width: 100%; background: linear-gradient(#ffffff40, transparent), var(--c); transition: width 0.25s linear; box-shadow: 0 0 10px var(--c); }
+#timebar span { position: absolute; right: 8px; top: -22px; font-size: 0.8rem; color: #f6ecd2; background: #1c100ae0; padding: 1px 9px; border-radius: 99px; font-variant-numeric: tabular-nums; }
+#timebar.low i { background: #d93a2b; box-shadow: 0 0 12px #ff4a33; animation: clockPulse 0.8s infinite; }
+#timebar.low span { background: #b3261e; }
+#timebar.flash i { background: #7ee08a; box-shadow: 0 0 16px #7ee08a; }
+#timebar.flash span { background: #2f7a3a; }

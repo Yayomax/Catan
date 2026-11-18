@@ -24,6 +24,10 @@ let modal = null; // { kind, ...datos }
 let lastRoll = 0;
 let logOpen = false;
 let connected = false;
+let timer = null; // { deadline, total } en hora del servidor
+let clockOffset = 0; // hora del servidor - hora local
+const TURN_OPTIONS = [0, 30, 60, 90, 120, 180];
+const fmtSecs = (n) => (n ? (n < 60 ? `${n} s` : n % 60 ? `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')} min` : `${n / 60} min`) : 'Sin límite');
 
 const session = {
   get: () => JSON.parse(localStorage.getItem('litoral.session') || 'null'),
@@ -73,6 +77,8 @@ function onMessage(m) {
     lobby = { code: m.code };
     you = m.you;
     online = m.online;
+    timer = m.timer;
+    clockOffset = m.now - Date.now();
     S = { ...m.s, board };
     scene.sync(S);
     if (S.rollId !== lastRoll) {
@@ -193,6 +199,13 @@ function renderScreen() {
       <p class="muted">Código de la sala</p>
       <div class="code">${esc(lobby.code)}</div>
       <button class="btn ghost" data-act="copy">Copiar enlace para invitar</button>
+      <div class="setting">
+        <span>Tiempo por turno</span>
+        ${host
+          ? `<div class="opts">${TURN_OPTIONS.map((n) => `<button class="opt ${lobby.settings.turnSeconds === n ? 'on' : ''}" data-act="setTime" data-n="${n}">${fmtSecs(n)}</button>`).join('')}</div>`
+          : `<b>${fmtSecs(lobby.settings.turnSeconds)}</b>`}
+        ${lobby.settings.turnSeconds ? '<small>Cada construcción, carta o intercambio suma 10 s. Si se acaba el tiempo, el turno se completa solo.</small>' : ''}
+      </div>
       <ul class="roster">${lobby.players
         .map((p, i) => `<li><span class="dot" style="background:${p.color}"></span>${esc(p.name)}${i === 0 ? ' <em>anfitrión</em>' : ''}${i === you ? ' <em>vos</em>' : ''}<span class="rdy ${p.ready ? 'on' : ''}">${p.ready ? 'Listo' : 'Esperando'}</span></li>`)
         .join('')}</ul>
@@ -424,7 +437,8 @@ function render() {
   renderScreen();
   if (S) {
     renderPlayers();
-    $('status').innerHTML = `<span class="${myTurn() || S.discards[you] ? 'mine' : ''}">${statusText()}</span>`;
+    $('status').innerHTML = `<span class="${myTurn() || S.discards[you] ? 'mine' : ''}">${statusText()}<b id="clock"></b></span>`;
+    tickClock();
     renderLog();
     renderBottom();
     renderTradeBar();
@@ -465,6 +479,7 @@ const ACT = {
   },
   start: () => send({ t: 'start' }),
   ready: (d) => send({ t: 'ready', v: d.v === '1' }),
+  setTime: (d) => send({ t: 'settings', turnSeconds: Number(d.n) }),
   copy: async () => {
     const url = `${location.origin}/?sala=${lobby.code}`;
     try {
@@ -560,6 +575,34 @@ document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter' && ev.target.id === 'code') ACT.join();
   if (ev.key === 'Escape' && modal && !['steal', 'discard'].includes(modal.kind)) closeModal();
 });
+
+// Reloj del turno: se actualiza solo, sin redibujar todo.
+let lastLeft = null;
+let flashUntil = 0;
+function tickClock() {
+  const el = $('clock');
+  const bar = $('timebar');
+  if (!el || !bar) return;
+  if (!timer || !S || S.phase === 'ended') {
+    el.textContent = '';
+    bar.className = '';
+    lastLeft = null;
+    return;
+  }
+  const ms = Math.max(0, timer.deadline - (Date.now() + clockOffset));
+  const left = Math.ceil(ms / 1000);
+  const text = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+  el.textContent = text;
+  el.className = left <= 10 ? 'low' : '';
+  if (lastLeft !== null && left > lastLeft + 3 && left < Math.round(timer.total / 1000)) flashUntil = Date.now() + 900;
+  lastLeft = left;
+  const who = S.players[S.turn];
+  bar.className = `show${left <= 10 ? ' low' : ''}${Date.now() < flashUntil ? ' flash' : ''}`;
+  bar.style.setProperty('--c', who.color);
+  bar.querySelector('i').style.width = `${Math.min(100, (ms / timer.total) * 100)}%`;
+  bar.querySelector('span').textContent = Date.now() < flashUntil ? `+10 s · ${text}` : `${S.turn === you ? 'Tu turno' : who.name} · ${text}`;
+}
+setInterval(tickClock, 250);
 
 connect();
 render();

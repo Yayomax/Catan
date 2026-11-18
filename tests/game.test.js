@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createGame, applyAction, viewFor, validSettlements, validRoads, validCities,
-  validJaguarTiles, stealCandidates, canAfford, bankRate, COSTS, RES, WIN_POINTS,
+  validJaguarTiles, stealCandidates, canAfford, bankRate, COSTS, RES, WIN_POINTS, timeoutTurn, turnKey,
 } from '../shared/game.js';
 import { buildBoard } from '../shared/board.js';
 
@@ -189,5 +189,49 @@ test('partidas completas al azar terminan con un ganador válido', () => {
     assert.equal(s.phase, 'ended', `seed ${seed} no terminó`);
     assert.ok(viewFor(s, 0).players[s.winner].points >= WIN_POINTS);
     assert.ok(applyAction(s, s.turn, { type: 'endTurn' }, rng).error);
+  }
+});
+
+test('si se acaba el tiempo, el juego completa lo mínimo y pasa el turno', () => {
+  const rng = rngFrom(21);
+  const s = mk(3, 21);
+  // Colocación inicial completa solo con tiempos agotados.
+  let guard = 0;
+  while (s.phase === 'setup' && guard++ < 20) timeoutTurn(s, rng);
+  assert.equal(s.phase, 'play');
+  assert.equal(Object.keys(s.buildings).length, 6);
+  assert.equal(Object.keys(s.roads).length, 6);
+
+  // Sin tirar: tira y pasa.
+  const before = s.turn;
+  timeoutTurn(s, rng);
+  assert.notEqual(s.turn, before);
+  assert.equal(s.sub, 'roll');
+
+  // Con un 7 y descartes pendientes: descarta, mueve el yaguareté y pasa.
+  s.players[1].hand = { madera: 5, ladrillo: 5, lana: 0, trigo: 0, piedra: 0 };
+  s.players[2].hand = { madera: 0, ladrillo: 0, lana: 4, trigo: 4, piedra: 1 };
+  const seven = (() => { const q = [0, 0.99]; let i = 0; return () => q[i++ % 2]; })();
+  const pid = s.turn;
+  assert.ok(applyAction(s, pid, { type: 'roll' }, seven).ok);
+  assert.equal(s.sub, 'discard');
+  const jag = s.jaguar;
+  timeoutTurn(s, rng);
+  assert.deepEqual(s.discards, {});
+  assert.notEqual(s.jaguar, jag);
+  assert.equal(s.sub, 'roll');
+  assert.notEqual(s.turn, pid);
+  for (const p of s.players) for (const r of RES) assert.ok(p.hand[r] >= 0);
+
+  // Partidas enteras solo a tiempo agotado terminan sin trabarse.
+  for (let seed = 1; seed <= 5; seed++) {
+    const g = mk(2 + (seed % 5), seed + 100);
+    const r = rngFrom(seed);
+    let k = 0;
+    while (g.phase !== 'ended' && k++ < 3000) {
+      const key = turnKey(g);
+      timeoutTurn(g, r);
+      assert.notEqual(turnKey(g), key, 'el turno no avanzó');
+    }
   }
 });

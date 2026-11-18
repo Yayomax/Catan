@@ -527,6 +527,42 @@ function turnAction(state, me, a, rng) {
   return err('Acción desconocida.');
 }
 
+// Se acabó el tiempo del turno: el juego hace lo mínimo para seguir
+// (descartes, colocación, tirada, yaguareté) y pasa el turno.
+export function turnKey(state) {
+  return `${state.turnCount}:${state.turn}:${state.setupQueue.length}`;
+}
+
+export function timeoutTurn(state, rng = Math.random) {
+  if (state.phase === 'ended') return;
+  const key = turnKey(state);
+  const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+  say(state, `Se acabó el tiempo de ${state.players[state.turn].name}.`);
+  for (let i = 0; i < 40 && state.phase !== 'ended' && turnKey(state) === key; i++) {
+    const pid = state.turn;
+    if (state.sub === 'discard') {
+      for (const id of Object.keys(state.discards).map(Number)) {
+        const hand = state.players[id].hand;
+        const pool = RES.flatMap((r) => Array(hand[r]).fill(r));
+        const cards = zero();
+        for (const r of shuffle(pool, rng).slice(0, state.discards[id])) cards[r]++;
+        applyAction(state, id, { type: 'discard', cards }, rng);
+      }
+    } else if (state.phase === 'setup') {
+      if (state.sub === 'settlement') applyAction(state, pid, { type: 'buildSettlement', v: pick(validSettlements(state, pid)) }, rng);
+      else applyAction(state, pid, { type: 'buildRoad', e: pick(validRoads(state, pid)) }, rng);
+    } else if (state.sub === 'roll') {
+      applyAction(state, pid, { type: 'roll' }, rng);
+    } else if (state.sub === 'jaguar') {
+      const tile = pick(validJaguarTiles(state));
+      const cands = stealCandidates(state, tile, pid);
+      applyAction(state, pid, { type: 'moveJaguar', tile, victim: cands.length ? pick(cands) : undefined }, rng);
+    } else {
+      applyAction(state, pid, { type: 'endTurn' }, rng);
+    }
+  }
+}
+
 // Estado tal como lo ve un jugador: sin manos ajenas ni mazo.
 export function viewFor(state, pid, withBoard) {
   const { board, deck, players, ...rest } = state;
