@@ -7,7 +7,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { createGame, applyAction, viewFor, timeoutTurn, turnKey, newFlows } from '../shared/game.js';
+import { createGame, applyAction, viewFor, timeoutStage, timerStage, timerKey, newFlows } from '../shared/game.js';
 
 const PORT = Number(process.env.PORT) || 3001;
 const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
@@ -15,6 +15,9 @@ const COLORS = ['#c8402f', '#2f6fb5', '#e3a21a', '#ece6d6', '#3c9a5f', '#8456b0'
 const MAX_PLAYERS = 6;
 const TURN_OPTIONS = [0, 30, 60, 90, 120, 180]; // segundos; 0 = sin límite
 const BONUS_MS = 10000;
+const ROLL_MS = 5000; // para tirar los dados
+const DISCARD_MS = 15000; // para descartar con un 7
+const CHAT_MAX = 60;
 const BONUS_ACTIONS = new Set(['buildRoad', 'buildSettlement', 'buildCity', 'buyCard', 'playCard', 'bankTrade', 'offerTrade', 'acceptTrade']);
 // Solo para pruebas automáticas: permite turnos cortos.
 if (process.env.LITORAL_TEST_TIMERS) TURN_OPTIONS.push(4, 15);
@@ -110,7 +113,7 @@ function broadcast(room) {
       you: i,
       online: room.players.map((q) => !!q.ws),
       settings: room.settings,
-      timer: room.deadline ? { deadline: room.deadline, total: room.settings.turnSeconds * 1000 } : null,
+      timer: room.deadline ? { deadline: room.deadline, total: room.timerTotal, stage: timerStage(room.game) } : null,
       now: Date.now(),
       s: viewFor(room.game, i, withBoard, { hideBank: !room.settings.showBank }),
     });
@@ -119,20 +122,33 @@ function broadcast(room) {
 
 // ---------- Reloj de turno ----------
 
+// Tiempo de la etapa actual: tirar y descartar siempre tienen reloj; el
+// turno, solo si la sala eligió un tiempo.
+function stageMs(room) {
+  const g = room.game;
+  if (g.phase === 'play') {
+    const st = timerStage(g);
+    if (st === 'roll') return ROLL_MS;
+    if (st === 'discard') return DISCARD_MS;
+  }
+  return room.settings.turnSeconds * 1000;
+}
+
 function schedule(room) {
   clearTimeout(room.timer);
   room.timer = null;
   const g = room.game;
-  const secs = room.settings.turnSeconds;
-  if (!g || !secs || g.phase === 'ended') {
+  const ms = g && g.phase !== 'ended' ? stageMs(room) : 0;
+  if (!ms) {
     room.deadline = null;
     room.turnKey = null;
     return;
   }
-  const key = turnKey(g);
+  const key = timerKey(g);
   if (key !== room.turnKey || !room.deadline) {
     room.turnKey = key;
-    room.deadline = Date.now() + secs * 1000;
+    room.deadline = Date.now() + ms;
+    room.timerTotal = ms;
   }
   // Con nadie conectado, el reloj se detiene; arranca de nuevo al volver alguien.
   if (!room.players.some((p) => p.ws)) {
@@ -146,14 +162,14 @@ function onTimeout(room) {
   room.timer = null;
   if (!room.game || room.game.phase === 'ended') return;
   newFlows(room.game);
-  timeoutTurn(room.game);
+  timeoutStage(room.game);
   schedule(room);
   broadcast(room);
 }
 
 function addBonus(room) {
   const secs = room.settings.turnSeconds;
-  if (!room.deadline || !secs) return;
+  if (!room.deadline || !secs || timerStage(room.game) !== 'turn') return;
   room.deadline = Math.min(room.deadline + BONUS_MS, Date.now() + secs * 1000);
 }
 
@@ -165,6 +181,7 @@ function attach(ws, room, index) {
   ws.index = index;
   ws.boardFor = null;
   send(ws, { t: 'joined', code: room.code, token: p.token });
+  send(ws, { t: 'chatlog', list: room.chat });
   if (room.game && !room.timer) schedule(room);
   broadcast(room);
 }
@@ -175,7 +192,7 @@ function handle(ws, m) {
   if (m.t === 'create' || m.t === 'join') {
     let room;
     if (m.t === 'create') {
-      room = { code: newCode(), players: [], game: null, touched: Date.now(), settings: { turnSeconds: 0, showBank: true }, timer: null, deadline: null, turnKey: null };
+      room = { code: newCode(), players: [], game: null, touched: Date.now(), settings: { turnSeconds: 0, showBank: true }, chat: [], timer: null, deadline: null, turnKey: null };
       rooms.set(room.code, room);
     } else {
       room = rooms.get(String(m.code || '').toUpperCase());
@@ -203,6 +220,19 @@ function handle(ws, m) {
 
   const room = ws.room;
   if (!room) return fail('No estás en una sala.');
+
+  if (m.t === 'chat') {
+    const text = String(m.text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    const now = Date.now();
+    if (!text || now - (ws.lastChat || 0) < 400) return;
+    ws.lastChat = now;
+    const p = room.players[ws.index];
+    const msg = { from: ws.index, name: p.name, color: p.color, text, ts: now };
+    room.chat.push(msg);
+    if (room.chat.length > CHAT_MAX) room.chat.shift();
+    for (const q of room.players) send(q.ws, { t: 'chat', m: msg });
+    return;
+  }
 
   if (m.t === 'settings') {
     if (ws.index !== 0) return fail('Solo quien creó la sala cambia la configuración.');

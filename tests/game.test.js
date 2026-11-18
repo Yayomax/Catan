@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createGame, applyAction, viewFor, validSettlements, validRoads, validCities,
-  validJaguarTiles, stealCandidates, canAfford, bankRate, COSTS, RES, WIN_POINTS, timeoutTurn, turnKey, newFlows,
+  validJaguarTiles, stealCandidates, canAfford, bankRate, COSTS, RES, WIN_POINTS, timeoutTurn, turnKey, newFlows, timeoutStage, timerStage, bankCredits,
 } from '../shared/game.js';
 import { buildBoard, spiralOrder } from '../shared/board.js';
 
@@ -352,4 +352,58 @@ test('movimientos de cartas para animar, con el robo oculto a terceros', () => {
   // Banco oculto: no viaja en la vista.
   assert.equal(viewFor(s, p, false, { hideBank: true }).bank, undefined);
   assert.ok(viewFor(s, p).bank);
+});
+
+test('cambios múltiples con el banco y los puertos', () => {
+  const rng = rngFrom(51);
+  const s = mk(2, 51);
+  doSetup(s, rng);
+  s.sub = 'main';
+  const p = s.turn;
+  const me = s.players[p];
+  const give4 = (r) => bankRate(s, p, r);
+  // Sin puertos propios, la madera va 4:1 (o mejor si el pueblo inicial está en un puerto).
+  const rate = give4('madera');
+  for (const r of RES) { s.bank[r] += me.hand[r]; me.hand[r] = 0; }
+  me.hand.madera = rate * 2;
+  s.bank.madera -= rate * 2;
+  // 8 por 2 (o 2 grupos según el puerto) de dos recursos distintos.
+  must(s, p, { type: 'bankTrade', give: { madera: rate * 2 }, get: { piedra: 1, trigo: 1 } }, rng);
+  assert.equal(me.hand.madera, 0);
+  assert.equal(me.hand.piedra, 1);
+  assert.equal(me.hand.trigo, 1);
+  // Grupos incompletos o cantidades que no cierran se rechazan.
+  me.hand.madera = rate + 1;
+  s.bank.madera -= rate + 1;
+  assert.equal(bankCredits(s, p, { madera: rate + 1 }), -1);
+  assert.ok(applyAction(s, p, { type: 'bankTrade', give: { madera: rate + 1 }, get: { piedra: 1 } }, rng).error);
+  assert.ok(applyAction(s, p, { type: 'bankTrade', give: { madera: rate }, get: { piedra: 2 } }, rng).error);
+  // Con un puerto 2:1 de un recurso, ese recurso rinde el doble.
+  const port = s.board.ports.find((x) => x.type !== 'any');
+  s.buildings[port.a] = { p, type: 'settlement' };
+  assert.equal(bankRate(s, p, port.type), 2);
+  for (const r of RES) assert.equal(s.bank[r] + s.players.reduce((k, pl) => k + pl.hand[r], 0), 19);
+});
+
+test('pre-timers: tirar los dados y descartar', () => {
+  const rng = rngFrom(61);
+  const s = mk(3, 61);
+  doSetup(s, rng);
+  assert.equal(timerStage(s), 'roll');
+  const turn = s.turn;
+  timeoutStage(s, rng);
+  assert.equal(s.turn, turn, 'tirar solo no pasa el turno');
+  assert.notEqual(s.sub, 'roll');
+  // Descarte con 7
+  const s2 = mk(3, 62);
+  doSetup(s2, rng);
+  s2.players[1].hand = { madera: 5, ladrillo: 5, lana: 0, trigo: 0, piedra: 0 };
+  for (const r of ['madera', 'ladrillo']) s2.bank[r] -= 5;
+  const seven = (() => { const q = [0, 0.99]; let i = 0; return () => q[i++ % 2]; })();
+  must(s2, s2.turn, { type: 'roll' }, seven);
+  assert.equal(timerStage(s2), 'discard');
+  timeoutStage(s2, rng);
+  assert.deepEqual(s2.discards, {});
+  assert.equal(s2.sub, 'jaguar', 'después del descarte, el jugador de turno mueve el ladrón');
+  assert.equal(s2.players[1].hand.madera + s2.players[1].hand.ladrillo, 5);
 });

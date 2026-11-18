@@ -61,11 +61,27 @@ export const ICONS = {
 };
 
 export const CARD_INFO = {
-  baqueano: { label: 'Baqueano', text: 'Mové el yaguareté y quitale una carta a un vecino.' },
-  picada: { label: 'Picada', text: 'Abrí 2 caminos gratis.' },
-  cosecha: { label: 'Cosecha', text: 'Tomá 2 recursos a elección.' },
-  feria: { label: 'Feria', text: 'Elegí un recurso: todos te entregan los que tengan.' },
-  fiesta: { label: 'Fiesta patronal', text: 'Vale 1 punto. Se cuenta sola.' },
+  baqueano: { label: 'Caballero', text: 'Mové el ladrón y robale una carta a un jugador con pueblo o ciudad en ese terreno. Con 3 o más tenés el Ejército más grande.' },
+  picada: { label: 'Construcción de carreteras', text: 'Construí 2 carreteras gratis.' },
+  cosecha: { label: 'Descubrimiento', text: 'Tomá 2 recursos del banco, los que quieras.' },
+  feria: { label: 'Monopolio', text: 'Elegí un recurso: todos los jugadores te dan todas las cartas que tengan de ese recurso.' },
+  fiesta: { label: 'Punto de victoria', text: 'Vale 1 punto. Queda oculta y se cuenta sola.' },
+};
+
+// Íconos de la interfaz (rivales, cartas, chat).
+const ui = (body) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+export const UI = {
+  vp: ui('<path d="M12 3l2.6 5.5 6 .8-4.4 4.1 1.1 5.9L12 16.4 6.7 19.3l1.1-5.9L3.4 9.3l6-.8z" fill="currentColor" stroke="none"/>'),
+  cards: ui('<rect x="4" y="5" width="11" height="15" rx="2" fill="currentColor" fill-opacity=".25"/><rect x="9" y="3" width="11" height="15" rx="2" fill="currentColor" fill-opacity=".55"/>'),
+  dev: ui('<rect x="5" y="3" width="14" height="18" rx="2" fill="currentColor" fill-opacity=".3"/><path d="M12 7v10M8.5 10.5L12 7l3.5 3.5"/>'),
+  knight: ui('<path d="M6 21h12M8 21l1-5h6l1 5M9 16c-1-3 0-7 3-10 2 1 4 3 4 6l-2 1-1-2-2 2"/><circle cx="13.5" cy="9" r=".8" fill="currentColor"/>'),
+  road: ui('<path d="M4 19L10 5M20 19L14 5M12 8v2M12 13v2M12 18v1"/>'),
+  chat: ui('<path d="M4 5h16v11H9l-5 4z" fill="currentColor" fill-opacity=".2"/>'),
+  bank: ui('<path d="M3 9l9-5 9 5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>'),
+  send: ui('<path d="M4 12l16-8-6 16-2-7z" fill="currentColor" fill-opacity=".3"/>'),
+  check: ui('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+  cross: ui('<path d="M6 6l12 12M18 6L6 18"/>'),
+  trade: ui('<path d="M4 8h13l-3-3M20 16H7l3 3"/>'),
 };
 
 export const iconUrl = (name) => `data:image/svg+xml;utf8,${encodeURIComponent(ICONS[name])}`;

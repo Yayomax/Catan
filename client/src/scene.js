@@ -531,29 +531,19 @@ export function createScene(canvas) {
     anims.add(step);
   }
 
+  // Ladrón: un peón gris oscuro.
   function buildJaguar() {
-    const fur = std('#d7952a', { roughness: 0.6 });
-    const dark = std('#2a1c10');
+    const stone = std('#4a4d52', { roughness: 0.55, metalness: 0.1 });
     const g = new THREE.Group();
-    g.add(part(new THREE.CapsuleGeometry(0.075, 0.2, 4, 10).rotateZ(Math.PI / 2), fur, 0, 0.19, 0));
-    g.add(part(new THREE.SphereGeometry(0.08, 12, 10), fur, 0.2, 0.25, 0));
-    g.add(part(new THREE.SphereGeometry(0.04, 8, 8), fur, 0.27, 0.23, 0));
-    g.add(part(new THREE.SphereGeometry(0.016, 6, 6), dark, 0.305, 0.235, 0));
-    for (const z of [-0.045, 0.045]) {
-      g.add(part(new THREE.ConeGeometry(0.025, 0.045, 5), fur, 0.19, 0.335, z));
-      g.add(part(new THREE.SphereGeometry(0.012, 6, 6), dark, 0.262, 0.275, z * 0.75));
-      for (const x of [-0.12, 0.12]) g.add(part(new THREE.CylinderGeometry(0.026, 0.022, 0.15, 6), fur, x, 0.075, z));
-    }
-    const tail = part(new THREE.CylinderGeometry(0.014, 0.02, 0.24, 5), fur, -0.25, 0.25, 0);
-    tail.rotation.z = -0.9;
-    g.add(tail);
-    for (let i = 0; i < 9; i++) {
-      const a = i * 2.4;
-      g.add(part(new THREE.SphereGeometry(0.017, 5, 5), dark, -0.13 + (i % 5) * 0.065, 0.19 + Math.sin(a) * 0.066, Math.cos(a) * 0.066));
-    }
-    g.scale.setScalar(1.6);
+    const profile = [
+      [0.0, 0.0], [0.17, 0.0], [0.17, 0.04], [0.13, 0.07], [0.1, 0.16], [0.075, 0.3], [0.1, 0.34], [0.1, 0.37], [0.06, 0.39], [0.0, 0.39],
+    ].map(([x, y]) => new THREE.Vector2(x, y));
+    g.add(part(new THREE.LatheGeometry(profile, 24), stone, 0, 0, 0));
+    g.add(part(new THREE.SphereGeometry(0.095, 20, 16), stone, 0, 0.47, 0));
+    g.scale.setScalar(1.35);
     return g;
   }
+
 
   const jaguarPos = (tileId) => {
     const t = board.tiles[tileId];
@@ -679,45 +669,76 @@ export function createScene(canvas) {
   const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
   const glowMat = new THREE.MeshBasicMaterial({ color: '#fff0a8', transparent: true, opacity: 0.92, depthTest: false });
   const glowHover = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 1, depthTest: false });
+  const glowSoft = new THREE.MeshBasicMaterial({ color: '#fff6cf', transparent: true, opacity: 0.55, depthTest: false });
   const HL = {
     vertex: { hit: new THREE.SphereGeometry(0.3, 8, 6), glyph: new THREE.SphereGeometry(0.115, 16, 12) },
     edge: { hit: new THREE.BoxGeometry(0.62, 0.3, 0.34), glyph: new RoundedBoxGeometry(0.5, 0.06, 0.1, 2, 0.02) },
     tile: { hit: new THREE.CylinderGeometry(0.7, 0.7, 0.3, 12), glyph: new THREE.TorusGeometry(0.43, 0.04, 8, 40).rotateX(Math.PI / 2) },
+    city: { glyph: new THREE.TorusGeometry(0.17, 0.035, 8, 28).rotateX(Math.PI / 2) },
   };
   let hits = [];
   let onPick = null;
   let hovered = null;
 
+  // Resaltado de jugadas. Acepta (tipo, ids, alTocar) o una lista de grupos
+  // [{ kind, ids, onPick, soft }]; los grupos "soft" son sugerencias más tenues.
   function setHighlights(kind, ids, cb) {
     hlGroup.clear();
     hits = [];
     hovered = null;
-    onPick = cb || null;
+    onPick = null;
     canvas.style.cursor = '';
     if (!board || !kind) return;
-    for (const id of ids) {
-      const hit = new THREE.Mesh(HL[kind].hit, hitMat);
-      const glyph = new THREE.Mesh(HL[kind].glyph, glowMat);
-      glyph.renderOrder = 10;
-      hit.add(glyph);
-      if (kind === 'vertex') {
-        const v = board.vertices[id];
-        hit.position.set(v.x, H + 0.12, v.z);
-      } else if (kind === 'edge') {
-        const E = board.edges[id];
-        const a = board.vertices[E.a];
-        const b = board.vertices[E.b];
-        hit.position.set((a.x + b.x) / 2, H + 0.06, (a.z + b.z) / 2);
-        hit.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
-      } else {
-        const t = board.tiles[id];
-        hit.position.set(t.x, H + 0.1, t.z);
+    const groups = Array.isArray(kind) ? kind : [{ kind, ids, onPick: cb }];
+    for (const g of groups) {
+      for (const id of g.ids) {
+        const k = g.kind === 'city' ? 'vertex' : g.kind;
+        const hit = new THREE.Mesh(HL[k].hit, hitMat);
+        const glyph = new THREE.Mesh(g.kind === 'city' ? HL.city.glyph : HL[k].glyph, g.soft ? glowSoft : glowMat);
+        glyph.renderOrder = 10;
+        hit.add(glyph);
+        hit.position.copy(worldPoint(g.kind, id));
+        if (g.kind === 'edge') {
+          const E = board.edges[id];
+          const a = board.vertices[E.a];
+          const b = board.vertices[E.b];
+          hit.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
+        }
+        hit.userData.id = id;
+        hit.userData.onPick = g.onPick;
+        hit.userData.soft = !!g.soft;
+        hlGroup.add(hit);
+        hits.push(hit);
       }
-      hit.userData.id = id;
-      hlGroup.add(hit);
-      hits.push(hit);
     }
   }
+
+  function worldPoint(kind, id) {
+    if (kind === 'vertex') {
+      const v = board.vertices[id];
+      return new THREE.Vector3(v.x, H + 0.12, v.z);
+    }
+    if (kind === 'city') {
+      const v = board.vertices[id];
+      return new THREE.Vector3(v.x, H + 0.62, v.z);
+    }
+    if (kind === 'edge') {
+      const E = board.edges[id];
+      const a = board.vertices[E.a];
+      const b = board.vertices[E.b];
+      return new THREE.Vector3((a.x + b.x) / 2, H + 0.06, (a.z + b.z) / 2);
+    }
+    const t = board.tiles[id];
+    return new THREE.Vector3(t.x, H + 0.1, t.z);
+  }
+
+  // Posición en pantalla de un punto del tablero (para ubicar la confirmación).
+  function screenPoint(kind, id) {
+    const r = canvas.getBoundingClientRect();
+    const p = worldPoint(kind, id).project(camera);
+    return { x: r.left + ((p.x + 1) / 2) * r.width, y: r.top + ((1 - p.y) / 2) * r.height };
+  }
+
 
   const ray = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
@@ -746,13 +767,13 @@ export function createScene(canvas) {
   canvas.addEventListener('pointerup', (ev) => {
     if (!down || Math.hypot(ev.clientX - down.x, ev.clientY - down.y) > 8) return;
     const h = hitAt(ev);
-    if (h && onPick) onPick(h.userData.id);
+    if (h && h.userData.onPick) h.userData.onPick(h.userData.id);
   });
   canvas.addEventListener('pointermove', (ev) => {
     if (ev.pointerType === 'touch') return;
     const h = hitAt(ev);
     if (h === hovered) return;
-    if (hovered) hovered.children[0].material = glowMat;
+    if (hovered) hovered.children[0].material = hovered.userData.soft ? glowSoft : glowMat;
     hovered = h;
     if (h) h.children[0].material = glowHover;
     canvas.style.cursor = h ? 'pointer' : '';
@@ -805,5 +826,5 @@ export function createScene(canvas) {
     });
   }
 
-  return { setBoard, sync, setHighlights, rollDice, highlightPoints };
+  return { setBoard, sync, setHighlights, rollDice, highlightPoints, screenPoint };
 }

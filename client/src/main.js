@@ -1,9 +1,9 @@
 import { createScene } from './scene.js';
 import {
   RES, COSTS, WIN_POINTS, canAfford, validSettlements, validRoads, validCities,
-  validJaguarTiles, stealCandidates, bankRate, piecesLeft,
+  validJaguarTiles, stealCandidates, bankRate, piecesLeft, bankCredits,
 } from '../../shared/game.js';
-import { ICONS, RES_INFO, CARD_INFO } from './icons.js';
+import { ICONS, RES_INFO, CARD_INFO, UI } from './icons.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -11,7 +11,11 @@ const zero = () => Object.fromEntries(RES.map((r) => [r, 0]));
 const sum = (b) => RES.reduce((n, r) => n + (b[r] || 0), 0);
 
 const scene = createScene($('board'));
-if (new URLSearchParams(location.search).has('debug')) window.__scene = scene;
+if (new URLSearchParams(location.search).has('debug')) {
+  // Solo para pruebas automáticas.
+  window.__scene = scene;
+  window.__debug = { state: () => S, you: () => you, render: () => render() };
+}
 
 let ws = null;
 let you = null;
@@ -23,6 +27,12 @@ let mode = null; // 'road' | 'settlement' | 'city'
 let modal = null; // { kind, ...datos }
 let lastRoll = 0;
 let logOpen = false;
+let sideTab = 'log'; // 'log' | 'chat'
+let chat = [];
+let unread = 0;
+let tradeDraft = null; // { give, get } mientras armás un intercambio
+let confirmBuild = null; // { kind, id } jugada sugerida esperando confirmación
+const incoming = { madera: 0, ladrillo: 0, lana: 0, trigo: 0, piedra: 0 }; // cartas en vuelo hacia tu mano
 let notice = '';
 let bankOpen = false;
 let lastFlowSeq = null;
@@ -76,6 +86,9 @@ function onMessage(m) {
       scene.setBoard(board);
       lastRoll = m.s.rollId;
       lastFlowSeq = m.s.flowSeq;
+      tradeDraft = null;
+      confirmBuild = null;
+      for (const r of RES) incoming[r] = 0;
       modal = null;
       mode = null;
     }
@@ -95,15 +108,34 @@ function onMessage(m) {
     if (S.flowSeq !== lastFlowSeq) {
       lastFlowSeq = S.flowSeq;
       // Lo que cobra una tirada vuela cuando los dados terminan de rodar.
-      if (S.flows.length) pendingFlows = { flows: S.flows, delay: rolled ? 1150 : 0 };
+      if (S.flows.length) {
+        // Las cartas que vienen a tu mano suman recién cuando llegan.
+        for (const f of S.flows) if (f.to === you && f.res) incoming[f.res] += f.n;
+        pendingFlows = { flows: S.flows, delay: rolled ? 1050 : 0 };
+      }
     }
     if (!canUseMode()) mode = null;
+    if (!inMain()) {
+      tradeDraft = null;
+      confirmBuild = null;
+    }
+    if (confirmBuild && !suggestionStillValid(confirmBuild)) confirmBuild = null;
   } else if (m.t === 'error') {
     if (m.msg === 'No existe esa sala.') {
       notice = 'Esa sala no existe. Puede que el servidor se haya reiniciado: pedile a quien la creó un link nuevo.';
       $('screen').innerHTML = '';
     }
     toast(m.msg);
+  } else if (m.t === 'chatlog') {
+    chat = m.list || [];
+  } else if (m.t === 'chat') {
+    chat.push(m.m);
+    if (chat.length > 60) chat.shift();
+    const visibleChat = sideTab === 'chat' && (logOpen || !window.matchMedia('(max-width: 860px)').matches);
+    if (!visibleChat && m.m.from !== you) {
+      unread++;
+      toastChat(m.m);
+    }
   } else if (m.t === 'hello') {
     // Hay una versión nueva del juego: recargar para no quedar con la vieja.
     const seen = sessionStorage.getItem('litoral.build');
@@ -156,17 +188,18 @@ function statusText() {
   if (S.phase === 'ended') return `Ganó ${esc(S.players[S.winner].name)}`;
   if (S.discards[you]) return `Salió 7: descartá ${S.discards[you]} cartas`;
   if (S.phase === 'setup') {
-    if (!myTurn()) return `${name} está eligiendo dónde instalarse`;
-    return S.sub === 'settlement' ? 'Tocá una esquina para fundar tu rancho' : 'Ahora tocá un borde para abrir un camino';
+    if (!myTurn()) return `${name} está eligiendo dónde construir`;
+    return S.sub === 'settlement' ? 'Tocá una esquina para construir tu pueblo' : 'Ahora tocá un borde para tu carretera';
   }
   if (S.sub === 'discard') return 'Salió 7: esperando los descartes';
-  if (!myTurn()) return S.sub === 'roll' ? `Turno de ${name}` : `Turno de ${name} · salió ${S.dice[0] + S.dice[1]}`;
+  if (!myTurn()) return S.sub === 'roll' ? `Turno de ${name}: tirando los dados` : `Turno de ${name} · salió ${S.dice[0] + S.dice[1]}`;
   if (S.sub === 'roll') return 'Tu turno: tirá los dados';
-  if (S.sub === 'jaguar') return 'Tocá un terreno para mover el yaguareté';
-  if (S.freeRoads) return `Picada: colocá ${S.freeRoads} ${S.freeRoads > 1 ? 'caminos' : 'camino'} gratis`;
+  if (S.sub === 'jaguar') return 'Tocá un terreno para mover el ladrón';
+  if (S.freeRoads) return `Construcción de carreteras: colocá ${S.freeRoads} gratis`;
+  if (confirmBuild) return 'Confirmá la construcción';
   if (mode === 'road') return 'Tocá un borde resaltado';
   if (mode === 'settlement') return 'Tocá una esquina resaltada';
-  if (mode === 'city') return 'Tocá uno de tus ranchos';
+  if (mode === 'city') return 'Tocá uno de tus pueblos';
   return `Salió ${S.dice[0] + S.dice[1]} · construí, comerciá o terminá el turno`;
 }
 
@@ -188,8 +221,50 @@ function updateHighlights() {
   if (S.sub !== 'main') return scene.setHighlights(null);
   if (S.freeRoads || mode === 'road') return scene.setHighlights('edge', validRoads(S, you), (e) => act({ type: 'buildRoad', e }));
   if (mode === 'settlement') return scene.setHighlights('vertex', validSettlements(S, you), (v) => act({ type: 'buildSettlement', v }));
-  if (mode === 'city') return scene.setHighlights('vertex', validCities(S, you), (v) => act({ type: 'buildCity', v }));
-  scene.setHighlights(null);
+  if (mode === 'city') return scene.setHighlights('city', validCities(S, you), (v) => act({ type: 'buildCity', v }));
+  if (confirmBuild) return scene.setHighlights([{ kind: KIND_OF[confirmBuild.kind], ids: [confirmBuild.id], onPick: () => ACT.confirmBuild() }]);
+  if (tradeDraft) return scene.setHighlights(null);
+  // Sin elegir nada: se sugieren todas las jugadas que te alcanzan; tocarlas pide confirmación.
+  const groups = [];
+  const ask = (kind) => (id) => {
+    confirmBuild = { kind, id };
+    render();
+  };
+  if (canBuild('settlement')) groups.push({ kind: 'vertex', ids: validSettlements(S, you), onPick: ask('settlement'), soft: true });
+  if (canBuild('city')) groups.push({ kind: 'city', ids: validCities(S, you), onPick: ask('city'), soft: true });
+  if (canBuild('road')) groups.push({ kind: 'edge', ids: validRoads(S, you), onPick: ask('road'), soft: true });
+  scene.setHighlights(groups.length ? groups : null);
+}
+
+const KIND_OF = { road: 'edge', settlement: 'vertex', city: 'city' };
+const PIECE = { road: 'Carretera', settlement: 'Pueblo', city: 'Ciudad' };
+const BUILD_ACTION = { road: (e) => ({ type: 'buildRoad', e }), settlement: (v) => ({ type: 'buildSettlement', v }), city: (v) => ({ type: 'buildCity', v }) };
+
+function suggestionStillValid(c) {
+  if (!canBuild(c.kind)) return false;
+  const ids = c.kind === 'road' ? validRoads(S, you) : c.kind === 'settlement' ? validSettlements(S, you) : validCities(S, you);
+  return ids.includes(c.id);
+}
+
+function renderConfirm() {
+  const el = $('confirm');
+  if (!S || !confirmBuild) {
+    el.className = '';
+    el.innerHTML = '';
+    return;
+  }
+  const { kind, id } = confirmBuild;
+  const pt = scene.screenPoint(KIND_OF[kind], id);
+  el.className = 'show';
+  el.innerHTML = `<div class="bubble">
+    <b>${PIECE[kind]}</b>${costRow(COSTS[kind])}
+    <div class="yn"><button class="btn small" data-act="cancelBuild" aria-label="cancelar">${UI.cross}</button>
+    <button class="btn primary small" data-act="confirmBuild" aria-label="construir">${UI.check} Construir</button></div></div>`;
+  const w = el.offsetWidth;
+  const x = Math.max(8, Math.min(window.innerWidth - w - 8, pt.x - w / 2));
+  const y = Math.max(70, pt.y - el.offsetHeight - 26);
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
 }
 
 // ---------- HTML ----------
@@ -261,7 +336,7 @@ function renderScreen() {
   const urlCode = new URLSearchParams(location.search).get('sala') || '';
   el.innerHTML = `<div class="sheet">
     <h1>Litoral</h1>
-    <p class="lead">Poblá la isla: juntá recursos, abrí caminos y comerciá con tus amigos.</p>
+    <p class="lead">Poblá la isla: juntá recursos, construí carreteras y comerciá con tus amigos.</p>
     ${notice ? `<p class="notice">${esc(notice)}</p>` : ''}
     <label>Tu nombre<input id="name" maxlength="16" autocomplete="off" value="${esc(localStorage.getItem('litoral.name') || '')}" placeholder="Nombre" /></label>
     <button class="btn primary" data-act="create">Crear sala</button>
@@ -276,26 +351,29 @@ function renderPlayers() {
   $('players').innerHTML =
     S.players
       .map((p) => {
-        const tags = [];
-        if (S.longest === p.id) tags.push('<span class="tag">Picada larga</span>');
-        if (S.largest === p.id) tags.push('<span class="tag">Baqueanía</span>');
-        return `<div class="player ${S.turn === p.id && S.phase !== 'ended' ? 'turn' : ''} ${online[p.id] ? '' : 'off'}" data-pid="${p.id}" style="--c:${p.color}">
-          <div class="who"><span class="dot"></span><b>${esc(p.name)}</b>${p.id === you ? '<em>vos</em>' : ''}</div>
-          <div class="stats">
-            <span class="pts" title="Puntos">${p.points}<small>/${WIN_POINTS}</small></span>
-            <span title="Cartas de recurso en mano">${p.handCount} <small>cartas</small></span>
-            <span title="Cartas de oficio">${p.devCount} <small>oficio</small></span>
-            <span title="Baqueanos jugados">${p.guard} <small>baq.</small></span>
-            <span title="Camino más largo">${p.roadLen} <small>cam.</small></span>
+        const turn = S.turn === p.id && S.phase !== 'ended';
+        const award = (on) => (on ? 'award' : '');
+        return `<div class="player ${turn ? 'turn' : ''} ${online[p.id] ? '' : 'off'}" data-pid="${p.id}" style="--c:${p.color}">
+          <div class="who">
+            <span class="avatar">${esc(p.name.slice(0, 1).toUpperCase())}</span>
+            <b>${esc(p.name)}</b>${p.id === you ? '<em>vos</em>' : ''}${online[p.id] ? '' : '<em class="offline">desconectado</em>'}
+            <span class="vp" title="Puntos de victoria">${UI.vp}${p.points}</span>
           </div>
-          ${tags.join('')}
+          <div class="badges">
+            <span class="b ${p.handCount > 7 ? 'danger' : ''}" title="Cartas de recurso en la mano">${UI.cards}<b>${p.handCount}</b></span>
+            <span class="b" title="Cartas de desarrollo">${UI.dev}<b>${p.devCount}</b></span>
+            <span class="b ${award(S.largest === p.id)}" title="Caballeros jugados${S.largest === p.id ? ' · Ejército más grande (+2)' : ''}">${UI.knight}<b>${p.guard}</b></span>
+            <span class="b ${award(S.longest === p.id)}" title="Carretera más larga${S.longest === p.id ? ' · Gran Ruta Comercial (+2)' : ''}">${UI.road}<b>${p.roadLen}</b></span>
+          </div>
+          ${turn ? `<div class="turnline">${p.id === you ? 'Tu turno' : 'Su turno'} <b class="clockv"></b></div>` : ''}
         </div>`;
       })
       .join('') +
     `<div class="tools">
       <button class="chip" data-act="rules">Reglas</button>
-      <button class="chip only-narrow ${bankOpen ? 'on' : ''}" data-act="bankPanel" id="bankBtn">Banco</button>
-      <button class="chip only-narrow" data-act="log">Crónica</button>
+      <button class="chip only-narrow ${bankOpen ? 'on' : ''}" data-act="bankPanel" id="bankBtn">${UI.bank}<span>Banco</span></button>
+      <button class="chip only-narrow ${logOpen && sideTab === 'chat' ? 'on' : ''}" data-act="openChat" id="chatBtn">${UI.chat}<span>Chat</span>${unread ? `<i class="badge">${unread}</i>` : ''}</button>
+      <button class="chip only-narrow ${logOpen && sideTab === 'log' ? 'on' : ''}" data-act="log">Crónica</button>
       <span class="room">Sala ${esc(lobby.code)}</span>
     </div>`;
 }
@@ -303,10 +381,36 @@ function renderPlayers() {
 function renderLog() {
   const el = $('log');
   el.className = logOpen ? 'open' : '';
-  el.innerHTML = `<h3>Crónica <button class="x only-narrow" data-act="log" aria-label="cerrar">×</button></h3>
-    <ol>${S.log.slice(-40).map((l) => `<li>${esc(l)}</li>`).join('')}</ol>`;
-  const ol = el.querySelector('ol');
+  if (!el.dataset.ready) {
+    el.dataset.ready = '1';
+    el.innerHTML = `<h3><span class="tabs"><button data-act="tab" data-t="log">Crónica</button><button data-act="tab" data-t="chat">Chat <i class="badge"></i></button></span>
+      <button class="x only-narrow" data-act="log" aria-label="cerrar">×</button></h3>
+      <ol class="loglist"></ol>
+      <div class="chatbox"><ol class="chatlist"></ol>
+        <form class="chatform" data-form="chat"><input id="chatInput" maxlength="200" autocomplete="off" placeholder="Escribí un mensaje…" />
+        <button class="btn small" aria-label="enviar">${UI.send}</button></form></div>`;
+  }
+  el.dataset.tab = sideTab;
+  el.querySelectorAll('[data-act="tab"]').forEach((b) => b.classList.toggle('on', b.dataset.t === sideTab));
+  el.querySelector('.tabs .badge').textContent = unread ? unread : '';
+  const ol = el.querySelector('.loglist');
+  ol.innerHTML = S.log.slice(-40).map((l) => `<li>${esc(l)}</li>`).join('');
   ol.scrollTop = ol.scrollHeight;
+  const cl = el.querySelector('.chatlist');
+  cl.innerHTML = chat.length
+    ? chat.map((c) => `<li class="${c.from === you ? 'mine' : ''}"><b style="color:${c.color}">${esc(c.name)}</b> ${esc(c.text)}</li>`).join('')
+    : '<li class="muted">Todavía no hay mensajes.</li>';
+  cl.scrollTop = cl.scrollHeight;
+  if (sideTab === 'chat' && (logOpen || !window.matchMedia('(max-width: 860px)').matches)) unread = 0;
+}
+
+let chatToastTimer = null;
+function toastChat(c) {
+  const el = $('chattoast');
+  el.innerHTML = `<b style="color:${c.color}">${esc(c.name)}</b> ${esc(c.text)}`;
+  el.classList.add('show');
+  clearTimeout(chatToastTimer);
+  chatToastTimer = setTimeout(() => el.classList.remove('show'), 4000);
 }
 
 function costRow(cost) {
@@ -315,10 +419,16 @@ function costRow(cost) {
 
 function renderBottom() {
   const hand = me().hand;
-  $('hand').innerHTML = RES.map(
-    (r) => `<div class="card ${hand[r] ? '' : 'empty'}" data-r="${r}" style="--c:${RES_INFO[r].color}">
-      ${icon(r)}<span class="n">${hand[r]}</span><small>${RES_INFO[r].label}</small></div>`,
-  ).join('');
+  const total = RES.reduce((n, r) => n + hand[r], 0);
+  const handEl = $('hand');
+  handEl.className = total > 7 && S.phase === 'play' ? 'danger' : '';
+  handEl.title = total > 7 ? `Tenés ${total} cartas: si sale un 7, perdés la mitad.` : '';
+  handEl.innerHTML = RES.map((r) => {
+    const n = Math.max(0, hand[r] - incoming[r]);
+    const tappable = inMain() && hand[r] > (tradeDraft ? tradeDraft.give[r] : 0);
+    return `<div class="card ${n ? '' : 'empty'} ${tappable ? 'tap' : ''}" data-r="${r}" ${tappable ? `data-act="handCard"` : ''} style="--c:${RES_INFO[r].color}">
+      ${icon(r)}<span class="n">${n}</span><small>${RES_INFO[r].label}</small></div>`;
+  }).join('') + (total > 7 && S.phase === 'play' ? `<div class="warn">${total} cartas: ¡cuidado con el 7!</div>` : '');
 
   const dice = S.dice ? `<div class="dice" title="Última tirada"><span>${S.dice[0]}</span><span>${S.dice[1]}</span></div>` : '';
   let html = '';
@@ -328,19 +438,50 @@ function renderBottom() {
     const b = (kind, label) =>
       `<button class="btn build ${mode === kind ? 'active' : ''}" data-act="mode" data-m="${kind}" ${canBuild(kind) ? '' : 'disabled'}>
         <span>${label}</span>${costRow(COSTS[kind])}</button>`;
-    html = `${b('road', 'Camino')}${b('settlement', 'Rancho')}${b('city', 'Pueblo')}
-      <button class="btn" data-act="trade" ${inMain() ? '' : 'disabled'}>Comerciar</button>
+    html = `${b('road', 'Carretera')}${b('settlement', 'Pueblo')}${b('city', 'Ciudad')}
+      <button class="btn ${tradeDraft ? 'active' : ''}" data-act="trade" ${inMain() ? '' : 'disabled'}>${UI.trade}<span>Comerciar</span></button>
       <button class="btn primary" data-act="end" ${inMain() ? '' : 'disabled'}>Terminar turno</button>`;
   }
-  const cards = S.phase === 'play' ? `<button class="btn" data-act="cards">Oficios <b>${me().dev.length + me().newDev.length}</b></button>` : '';
+  const cards = S.phase === 'play' ? `<button class="btn" data-act="cards">${UI.dev}<span>Desarrollo</span> <b>${me().dev.length + me().newDev.length}</b></button>` : '';
   $('actions').innerHTML = dice + html + cards;
+}
+
+function composerHTML() {
+  const { give, get } = tradeDraft;
+  const g = RES.filter((r) => give[r]);
+  const w = RES.filter((r) => get[r]);
+  const overlap = g.some((r) => get[r]);
+  const credits = bankCredits(S, you, give);
+  const want = sum(get);
+  const bankStock = !S.bank || RES.every((r) => S.bank[r] >= get[r]);
+  const bankOk = g.length && w.length && !overlap && credits > 0 && credits === want && bankStock;
+  const offerOk = g.length && w.length && !overlap && !S.trade;
+  let hint = 'Tocá tus cartas para ofrecerlas y elegí arriba qué querés recibir.';
+  if (g.length && credits < 0) hint = `Con el banco se cambia de a ${g.map((r) => `${bankRate(S, you, r)} ${RES_INFO[r].label.toLowerCase()}`).join(', ')}.`;
+  else if (g.length && credits >= 0 && credits !== want) hint = `Con el banco, lo que das vale ${credits} carta${credits === 1 ? '' : 's'}.`;
+  else if (bankOk) hint = 'Podés cambiarlo con el banco o ofrecerlo a los jugadores.';
+  if (overlap) hint = 'No podés dar y pedir el mismo recurso.';
+  const chip = (b, key) =>
+    RES.filter((r) => b[r])
+      .map((r) => `<button class="tchip" data-act="tdec" data-k="${key}" data-r="${r}" title="Quitar una" style="--c:${RES_INFO[r].color}">${icon(r)}<b>${b[r]}</b></button>`)
+      .join('');
+  return `<div class="composer">
+    <div class="trow"><span class="lbl">Pedís</span>
+      <div class="tpick">${RES.map((r) => `<button class="tres ${get[r] ? 'on' : ''}" data-act="tinc" data-k="get" data-r="${r}" style="--c:${RES_INFO[r].color}" title="Pedir ${RES_INFO[r].label}">${icon(r)}${get[r] ? `<b>${get[r]}</b>` : ''}</button>`).join('')}</div>
+      <button class="x" data-act="trade" aria-label="cerrar">×</button></div>
+    <div class="trow"><span class="lbl">Das</span><div class="tgive">${chip(give, 'give') || '<span class="muted">Tocá tus cartas abajo</span>'}</div></div>
+    <div class="trow tacts"><small class="hint">${hint}</small>
+      <button class="btn small" data-act="bankTrade" ${bankOk ? '' : 'disabled'}>${UI.bank}<span>Banco</span></button>
+      <button class="btn primary small" data-act="offer" ${offerOk ? '' : 'disabled'}>Ofrecer a jugadores</button></div>
+  </div>`;
 }
 
 function renderTradeBar() {
   const el = $('tradebar');
   const t = S.trade;
+  const composer = tradeDraft ? composerHTML() : '';
   if (!t) {
-    el.innerHTML = '';
+    el.innerHTML = composer;
     return;
   }
   if (t.from === you) {
@@ -356,7 +497,7 @@ function renderTradeBar() {
         })
         .join('')}
         <button class="btn small" data-act="cancelTrade">Retirar</button></div>
-    </div>`;
+    </div>${composer}`;
   } else {
     const mine = t.responses[you];
     const can = canAfford(me().hand, t.get);
@@ -381,28 +522,12 @@ function modalHTML() {
     if (!modal || modal.kind !== 'discard') modal = { kind: 'discard', cards: zero() };
     const need = S.discards[you];
     const n = sum(modal.cards);
-    return `<h2>Salió un 7</h2><p>Tenés más de 7 cartas: descartá <b>${need}</b>.</p>
+    return `<h2>Salió un 7</h2><p>Tenés más de 7 cartas: descartá <b>${need}</b>. Te quedan <b class="clockv"></b>; si no elegís, se descarta al azar.</p>
       ${picker('cards', modal.cards, (r) => Math.min(me().hand[r], modal.cards[r] + need - n), (r) => `tenés ${me().hand[r]}`)}
       <button class="btn primary" data-act="confirmDiscard" ${n === need ? '' : 'disabled'}>Descartar ${n}/${need}</button>`;
   }
   if (!modal) return '';
   const close = '<button class="x" data-act="close" aria-label="cerrar">×</button>';
-
-  if (modal.kind === 'trade') {
-    const { give, get } = modal;
-    const g = RES.filter((r) => give[r]);
-    const w = RES.filter((r) => get[r]);
-    const bankOk = g.length === 1 && w.length === 1 && g[0] !== w[0] && give[g[0]] === bankRate(S, you, g[0]) * get[w[0]] && (!S.bank || S.bank[w[0]] >= get[w[0]]);
-    const offerOk = g.length && w.length && !g.some((r) => get[r]);
-    return `${close}<h2>Comerciar</h2>
-      <h4>Das</h4>${picker('give', give, (r) => me().hand[r], (r) => `puerto ${bankRate(S, you, r)}:1`)}
-      <h4>Pedís</h4>${picker('get', get, () => 9, S.bank ? (r) => `banco ${S.bank[r]}` : null)}
-      <div class="row">
-        <button class="btn primary" data-act="offer" ${offerOk ? '' : 'disabled'}>Ofrecer a los jugadores</button>
-        <button class="btn" data-act="bank" ${bankOk ? '' : 'disabled'}>Cambiar en el puerto</button>
-      </div>
-      <p class="muted">En el puerto entregás varias cartas iguales por una. La proporción mejora si tenés un rancho en un muelle.</p>`;
-  }
 
   if (modal.kind === 'cards') {
     const p = me();
@@ -420,27 +545,27 @@ function modalHTML() {
       })
       .join('');
     const canBuy = inMain() && S.deckCount > 0 && canAfford(p.hand, COSTS.card);
-    return `${close}<h2>Cartas de oficio</h2>
+    return `${close}<h2>Cartas de desarrollo</h2>
       <ul class="devlist">${rows || '<li class="muted">Todavía no tenés ninguna.</li>'}</ul>
       <button class="btn primary build" data-act="buy" ${canBuy ? '' : 'disabled'}><span>Comprar carta</span>${costRow(COSTS.card)}</button>
       <p class="muted">Quedan ${S.deckCount} en el mazo. Podés jugar una por turno, y no la que compraste en este turno.</p>`;
   }
 
   if (modal.kind === 'steal') {
-    return `<h2>¿A quién le quitás una carta?</h2><div class="row">${modal.c
+    return `<h2>¿A quién le robás una carta?</h2><div class="row">${modal.c
       .map((p) => `<button class="btn" data-act="victim" data-p="${p}"><span class="dot" style="background:${S.players[p].color}"></span>${esc(S.players[p].name)}</button>`)
       .join('')}</div>`;
   }
 
   if (modal.kind === 'feria') {
-    return `${close}<h2>Feria</h2><p>Elegí el recurso que todos te entregan.</p><div class="row">${RES.map(
+    return `${close}<h2>Monopolio</h2><p>Elegí el recurso: todos te dan todas las que tengan.</p><div class="row">${RES.map(
       (r) => `<button class="btn resbtn" data-act="feria" data-r="${r}">${icon(r)}${RES_INFO[r].label}</button>`,
     ).join('')}</div>`;
   }
 
   if (modal.kind === 'cosecha') {
     const n = sum(modal.pick);
-    return `${close}<h2>Cosecha</h2><p>Elegí 2 recursos.</p>
+    return `${close}<h2>Descubrimiento</h2><p>Elegí 2 recursos del banco.</p>
       ${picker('pick', modal.pick, (r) => Math.min(S.bank ? S.bank[r] : 2, modal.pick[r] + 2 - n), S.bank ? (r) => `banco ${S.bank[r]}` : null)}
       <button class="btn primary" data-act="cosecha" ${n === 2 ? '' : 'disabled'}>Tomar</button>`;
   }
@@ -450,18 +575,16 @@ function modalHTML() {
     return `${close}<h2>Cómo se juega</h2>
       <p>Gana quien llega primero a <b>${WIN_POINTS} puntos</b> en su turno.</p>
       <ul class="costs">
-        ${line('Camino', COSTS.road, 'Conecta tus ranchos. 5 o más seguidos dan la Picada larga (2 puntos).')}
-        ${line('Rancho', COSTS.settlement, '1 punto. A dos caminos o más de cualquier otro.')}
-        ${line('Pueblo', COSTS.city, '2 puntos. Reemplaza un rancho y produce doble.')}
-        ${line('Carta de oficio', COSTS.card, '3 baqueanos jugados dan la Baqueanía (2 puntos).')}
+        ${line('Carretera', COSTS.road, 'Conecta tus pueblos. 5 o más seguidas dan la Gran Ruta Comercial (2 puntos).')}
+        ${line('Pueblo', COSTS.settlement, '1 punto. Tiene que estar a dos esquinas o más de cualquier otro.')}
+        ${line('Ciudad', COSTS.city, '2 puntos. Reemplaza a un pueblo y produce el doble.')}
+        ${line('Carta de desarrollo', COSTS.card, 'Caballero, Construcción de carreteras, Descubrimiento, Monopolio o Punto de victoria. 3 caballeros jugados dan el Ejército más grande (2 puntos).')}
       </ul>
-      <p>Cada tirada, los terrenos con ese número dan su recurso a quienes tengan un rancho o pueblo en sus esquinas:
+      <p>Cada tirada, los terrenos con ese número dan su recurso a quienes tengan un pueblo o una ciudad en sus esquinas:
         ${RES.map((r) => `<span class="mini">${icon(r)}${RES_INFO[r].terrain}</span>`).join(' ')}. El desierto no produce.</p>
-      <p>Con un <b>7</b>, quien tenga más de 7 cartas descarta la mitad y quien tiró mueve el <b>yaguareté</b>: ese terreno deja de producir y le quita una carta a un vecino.</p>
-      <p class="muted">Si ya jugaste a juegos de colonizar islas: rancho = poblado, pueblo = ciudad, yaguareté = ladrón,
-        baqueano = caballero, picada = construcción de caminos, cosecha = dos recursos a elección, feria = monopolio,
-        fiesta patronal = punto de victoria, muelle = puerto.</p>
-      <p>Arrastrá para girar la isla, pellizcá o usá la rueda para acercarte.</p>`;
+      <p>Con un <b>7</b>, quien tenga más de 7 cartas descarta la mitad (tiene 15 segundos) y quien tiró mueve el <b>ladrón</b>: ese terreno deja de producir y le roba una carta a un jugador de ahí.</p>
+      <p>Comercio: tocá tus cartas para armar un intercambio. Con el banco es 4:1, 3:1 con un puerto genérico y 2:1 con un puerto de ese recurso; podés cambiar varios grupos juntos.</p>
+      <p>Tenés 5 segundos para tirar los dados; si no, se tiran solos. Arrastrá para girar la isla, pellizcá o usá la rueda para acercarte.</p>`;
   }
   return '';
 }
@@ -486,6 +609,7 @@ function render() {
   }
   renderModal();
   updateHighlights();
+  renderConfirm();
   if (pendingFlows) {
     const { flows, delay } = pendingFlows;
     pendingFlows = null;
@@ -522,18 +646,30 @@ function anchorFor(who, res) {
   return document.querySelector(`.player[data-pid="${who}"]`);
 }
 
+function landMine(res) {
+  if (incoming[res] <= 0) return;
+  incoming[res]--;
+  const card = document.querySelector(`#hand .card[data-r="${res}"]`);
+  if (!card || !S) return;
+  const n = Math.max(0, me().hand[res] - incoming[res]);
+  card.querySelector('.n').textContent = n;
+  card.classList.toggle('empty', !n);
+}
+
 function animateFlows(flows) {
-  if (!S || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const still = !S || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let k = 0;
   for (const f of flows) {
-    const from = anchorFor(f.from, f.res);
-    const to = anchorFor(f.to, f.res);
-    if (!from || !to) continue;
-    for (let i = 0; i < Math.min(f.n, 6); i++) flyCard(f.res, from, to, k++ * 110);
+    const mine = f.to === you && f.res;
+    const from = still ? null : anchorFor(f.from, f.res);
+    const to = still ? null : anchorFor(f.to, f.res);
+    const flying = from && to ? Math.min(f.n, 6) : 0;
+    for (let i = 0; i < flying; i++) flyCard(f.res, from, to, k++ * 70, mine ? () => landMine(f.res) : null);
+    if (mine) for (let i = flying; i < f.n; i++) landMine(f.res);
   }
 }
 
-function flyCard(res, from, to, delay) {
+function flyCard(res, from, to, delay, onLand) {
   const a = from.getBoundingClientRect();
   const b = to.getBoundingClientRect();
   const card = document.createElement('div');
@@ -559,10 +695,11 @@ function flyCard(res, from, to, delay) {
       { transform: `translate(${dx * 0.5}px, ${dy * 0.5 + lift}px) scale(1.15) rotate(4deg)`, opacity: 1, offset: 0.45 },
       { transform: `translate(${dx}px, ${dy}px) scale(0.85) rotate(0deg)`, opacity: 1 },
     ],
-    { duration: 720, delay, easing: 'cubic-bezier(.35,.1,.25,1)', fill: 'forwards' },
+    { duration: 460, delay, easing: 'cubic-bezier(.3,.1,.3,1)', fill: 'forwards' },
   );
   anim.onfinish = () => {
     card.remove();
+    if (onLand) onLand();
     to.classList.remove('pop');
     void to.offsetWidth;
     to.classList.add('pop');
@@ -621,16 +758,70 @@ const ACT = {
   roll: () => act({ type: 'roll' }),
   end: () => {
     mode = null;
+    tradeDraft = null;
+    confirmBuild = null;
     act({ type: 'endTurn' });
   },
   mode: (d) => {
     mode = mode === d.m ? null : d.m;
+    confirmBuild = null;
+    tradeDraft = null;
     render();
   },
   trade: () => {
     mode = null;
-    modal = { kind: 'trade', give: zero(), get: zero() };
+    confirmBuild = null;
+    tradeDraft = tradeDraft ? null : { give: zero(), get: zero() };
     render();
+  },
+  handCard: (d) => {
+    if (!inMain()) return;
+    mode = null;
+    confirmBuild = null;
+    if (!tradeDraft) tradeDraft = { give: zero(), get: zero() };
+    if (tradeDraft.give[d.r] < me().hand[d.r]) tradeDraft.give[d.r]++;
+    tradeDraft.get[d.r] = 0;
+    render();
+  },
+  tinc: (d) => {
+    tradeDraft[d.k][d.r]++;
+    if (d.k === 'get') tradeDraft.give[d.r] = 0;
+    render();
+  },
+  tdec: (d) => {
+    tradeDraft[d.k][d.r] = Math.max(0, tradeDraft[d.k][d.r] - 1);
+    render();
+  },
+  bankTrade: () => {
+    act({ type: 'bankTrade', give: tradeDraft.give, get: tradeDraft.get });
+    tradeDraft = null;
+    render();
+  },
+  confirmBuild: () => {
+    if (!confirmBuild) return;
+    act(BUILD_ACTION[confirmBuild.kind](confirmBuild.id));
+    confirmBuild = null;
+    render();
+  },
+  cancelBuild: () => {
+    confirmBuild = null;
+    render();
+  },
+  tab: (d) => {
+    sideTab = d.t;
+    if (d.t === 'chat') unread = 0;
+    render();
+  },
+  openChat: () => {
+    const opening = !(logOpen && sideTab === 'chat');
+    logOpen = opening;
+    sideTab = 'chat';
+    if (opening) {
+      bankOpen = false;
+      unread = 0;
+    }
+    render();
+    if (opening) setTimeout(() => $('chatInput')?.focus(), 50);
   },
   cards: () => {
     modal = { kind: 'cards' };
@@ -641,7 +832,8 @@ const ACT = {
     render();
   },
   log: () => {
-    logOpen = !logOpen;
+    if (!logOpen || sideTab === 'log') logOpen = !logOpen;
+    sideTab = 'log';
     if (logOpen) bankOpen = false;
     render();
   },
@@ -655,14 +847,9 @@ const ACT = {
     render();
   },
   offer: () => {
-    act({ type: 'offerTrade', give: modal.give, get: modal.get });
-    closeModal();
-  },
-  bank: () => {
-    const give = RES.find((r) => modal.give[r]);
-    const get = RES.find((r) => modal.get[r]);
-    act({ type: 'bankTrade', give, get, n: modal.get[get] });
-    closeModal();
+    act({ type: 'offerTrade', give: tradeDraft.give, get: tradeDraft.get });
+    tradeDraft = null;
+    render();
   },
   respond: (d) => act({ type: 'respondTrade', accept: d.v === '1' }),
   accept: (d) => act({ type: 'acceptTrade', with: Number(d.p) }),
@@ -700,10 +887,19 @@ document.addEventListener('click', (ev) => {
   const el = ev.target.closest('[data-act]');
   if (el && !el.disabled) ACT[el.dataset.act]?.(el.dataset);
 });
+document.addEventListener('submit', (ev) => {
+  if (ev.target.dataset.form !== 'chat') return;
+  ev.preventDefault();
+  const input = $('chatInput');
+  const text = input.value.trim();
+  if (text) send({ t: 'chat', text });
+  input.value = '';
+});
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter' && ev.target.id === 'name') ACT[$('code').value ? 'join' : 'create']();
   if (ev.key === 'Enter' && ev.target.id === 'code') ACT.join();
-  if (ev.key === 'Escape' && modal && !['steal', 'discard'].includes(modal.kind)) closeModal();
+  if (ev.key === 'Escape' && confirmBuild) ACT.cancelBuild();
+  else if (ev.key === 'Escape' && modal && !['steal', 'discard'].includes(modal.kind)) closeModal();
 });
 
 // Reloj del turno: se actualiza solo, sin redibujar todo.
@@ -714,6 +910,7 @@ function tickClock() {
   const bar = $('timebar');
   if (!el || !bar) return;
   if (!timer || !S || S.phase === 'ended') {
+    document.querySelectorAll('.clockv').forEach((c) => (c.textContent = ''));
     el.textContent = '';
     bar.className = '';
     lastLeft = null;
@@ -724,6 +921,10 @@ function tickClock() {
   const text = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
   el.textContent = text;
   el.className = left <= 10 ? 'low' : '';
+  document.querySelectorAll('.clockv').forEach((c) => {
+    c.textContent = text;
+    c.classList.toggle('low', left <= 5);
+  });
   if (lastLeft !== null && left > lastLeft + 3 && left < Math.round(timer.total / 1000)) flashUntil = Date.now() + 900;
   lastLeft = left;
   const who = S.players[S.turn];

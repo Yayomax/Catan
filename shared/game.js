@@ -15,7 +15,7 @@ export const LIMITS = { road: 15, settlement: 5, city: 4 };
 export const WIN_POINTS = 10;
 export const CARD_TYPES = ['baqueano', 'picada', 'cosecha', 'feria', 'fiesta'];
 
-// Mazo de cartas de oficio: base (25) y ampliada para 5 a 6 jugadores (34).
+// Mazo de cartas de desarrollo: base (25) y ampliada para 5 a 6 jugadores (34).
 const DECKS = {
   base: { baqueano: 14, fiesta: 5, picada: 2, cosecha: 2, feria: 2 },
   grande: { baqueano: 20, fiesta: 5, picada: 3, cosecha: 3, feria: 3 },
@@ -162,6 +162,19 @@ export function bankRate(state, pid, res) {
   return rate;
 }
 
+// Cuántas cartas da el banco por lo que se entrega (-1 si no van en grupos exactos).
+export function bankCredits(state, pid, give) {
+  let credits = 0;
+  for (const r of RES) {
+    const n = give[r] || 0;
+    if (!n) continue;
+    const rate = bankRate(state, pid, r);
+    if (n % rate) return -1;
+    credits += n / rate;
+  }
+  return credits;
+}
+
 export function publicPoints(state, pid) {
   let vp = 0;
   for (const b of Object.values(state.buildings)) if (b.p === pid) vp += b.type === 'city' ? 2 : 1;
@@ -249,7 +262,7 @@ function awardTitle(state, field, stat, min, label) {
 
 function refreshRoads(state) {
   for (const p of state.players) p.roadLen = roadLength(state, p.id);
-  awardTitle(state, 'longest', 'roadLen', 5, 'la Picada más larga');
+  awardTitle(state, 'longest', 'roadLen', 5, 'la Gran Ruta Comercial');
 }
 
 function checkWin(state) {
@@ -340,17 +353,17 @@ function turnAction(state, me, a, rng) {
       state.setupVertex = a.v;
       state.sub = 'road';
       if (state.setupQueue.length <= state.players.length) {
-        // Segundo rancho: recibe un recurso por cada terreno vecino.
+        // Segundo pueblo: recibe un recurso por cada terreno vecino.
         for (const t of state.board.vertices[a.v].tiles) {
           const res = TERRAIN_RES[state.board.tiles[t].terrain];
           if (res) take(state, me, res);
         }
       }
-      say(state, `${me.name} funda un rancho.`);
+      say(state, `${me.name} construye un pueblo.`);
       return OK;
     }
     if (a.type === 'buildRoad' && state.sub === 'road') {
-      if (!roadSpotOk(state, a.e, pid)) return err('El camino tiene que salir de tu rancho nuevo.');
+      if (!roadSpotOk(state, a.e, pid)) return err('La carretera tiene que salir de tu pueblo nuevo.');
       state.roads[a.e] = pid;
       state.setupQueue.shift();
       state.setupVertex = null;
@@ -402,7 +415,7 @@ function turnAction(state, me, a, rng) {
       if (cands.length === 1) victim = cands[0];
       if (cands.length > 1 && !cands.includes(victim)) return err('Elegí a quién quitarle una carta.');
       state.jaguar = tile.id;
-      say(state, `${me.name} mueve el yaguareté.`);
+      say(state, `${me.name} mueve el ladrón.`);
       if (cands.length) {
         const v = state.players[victim];
         const pool = RES.flatMap((r) => Array(v.hand[r]).fill(r));
@@ -419,39 +432,39 @@ function turnAction(state, me, a, rng) {
     case 'buildRoad': {
       if (state.sub !== 'main') return err('Ahora no.');
       const free = state.freeRoads > 0;
-      if (piecesLeft(state, pid).road <= 0) return err('No te quedan caminos.');
+      if (piecesLeft(state, pid).road <= 0) return err('No te quedan carreteras.');
       if (!free && !canAfford(me.hand, COSTS.road)) return err('No te alcanza.');
       if (!roadSpotOk(state, a.e, pid)) return err('Ahí no se puede.');
       if (free) state.freeRoads--;
       else pay(state, me, COSTS.road);
       state.roads[a.e] = pid;
       if (state.freeRoads > 0 && (piecesLeft(state, pid).road <= 0 || !validRoads(state, pid).length)) state.freeRoads = 0;
-      say(state, `${me.name} abre un camino.`);
+      say(state, `${me.name} construye una carretera.`);
       refreshRoads(state);
       return OK;
     }
 
     case 'buildSettlement': {
       if (state.sub !== 'main' || state.freeRoads) return err('Ahora no.');
-      if (piecesLeft(state, pid).settlement <= 0) return err('No te quedan ranchos.');
+      if (piecesLeft(state, pid).settlement <= 0) return err('No te quedan pueblos.');
       if (!canAfford(me.hand, COSTS.settlement)) return err('No te alcanza.');
       if (!settlementSpotOk(state, a.v, pid, true)) return err('Ahí no se puede.');
       pay(state, me, COSTS.settlement);
       state.buildings[a.v] = { p: pid, type: 'settlement' };
-      say(state, `${me.name} funda un rancho.`);
+      say(state, `${me.name} construye un pueblo.`);
       refreshRoads(state);
       return OK;
     }
 
     case 'buildCity': {
       if (state.sub !== 'main' || state.freeRoads) return err('Ahora no.');
-      if (piecesLeft(state, pid).city <= 0) return err('No te quedan pueblos.');
+      if (piecesLeft(state, pid).city <= 0) return err('No te quedan ciudades.');
       if (!canAfford(me.hand, COSTS.city)) return err('No te alcanza.');
       const b = state.buildings[a.v];
-      if (!b || b.p !== pid || b.type !== 'settlement') return err('Ahí no hay un rancho tuyo.');
+      if (!b || b.p !== pid || b.type !== 'settlement') return err('Ahí no hay un pueblo tuyo.');
       pay(state, me, COSTS.city);
       b.type = 'city';
-      say(state, `${me.name} levanta un pueblo.`);
+      say(state, `${me.name} construye una ciudad.`);
       return OK;
     }
 
@@ -461,7 +474,7 @@ function turnAction(state, me, a, rng) {
       if (!canAfford(me.hand, COSTS.card)) return err('No te alcanza.');
       pay(state, me, COSTS.card);
       me.newDev.push(state.deck.pop());
-      say(state, `${me.name} compra una carta de oficio.`);
+      say(state, `${me.name} compra una carta de desarrollo.`);
       return OK;
     }
 
@@ -474,19 +487,19 @@ function turnAction(state, me, a, rng) {
         me.guard++;
         state.afterJaguar = state.sub;
         state.sub = 'jaguar';
-        say(state, `${me.name} llama a un baqueano.`);
-        awardTitle(state, 'largest', 'guard', 3, 'la Gran baqueanía');
+        say(state, `${me.name} juega un Caballero.`);
+        awardTitle(state, 'largest', 'guard', 3, 'el Ejército más grande');
       } else if (card === 'picada') {
         const n = Math.min(2, piecesLeft(state, pid).road);
-        if (!n || !validRoads(state, pid).length) return err('No tenés dónde abrir caminos.');
+        if (!n || !validRoads(state, pid).length) return err('No tenés dónde construir carreteras.');
         state.freeRoads = n;
-        say(state, `${me.name} abre una picada: ${n} caminos gratis.`);
+        say(state, `${me.name} juega Construcción de carreteras: ${n} gratis.`);
       } else if (card === 'cosecha') {
         if (!RES.includes(a.a) || !RES.includes(a.b)) return err('Elegí dos recursos.');
         if (state.bank[a.a] < (a.a === a.b ? 2 : 1) || state.bank[a.b] < 1) return err('No quedan esos recursos en el banco.');
         take(state, me, a.a);
         take(state, me, a.b);
-        say(state, `${me.name} levanta la cosecha: ${a.a} y ${a.b}.`);
+        say(state, `${me.name} juega Descubrimiento: ${a.a} y ${a.b}.`);
       } else if (card === 'feria') {
         if (!RES.includes(a.res)) return err('Elegí un recurso.');
         let got = 0;
@@ -497,7 +510,7 @@ function turnAction(state, me, a, rng) {
           p.hand[a.res] = 0;
         }
         me.hand[a.res] += got;
-        say(state, `${me.name} arma la feria y se lleva ${got} de ${a.res}.`);
+        say(state, `${me.name} juega Monopolio y se lleva ${got} de ${a.res}.`);
       } else return err('Carta desconocida.');
       me.dev.splice(me.dev.indexOf(card), 1);
       state.playedCard = true;
@@ -506,14 +519,28 @@ function turnAction(state, me, a, rng) {
 
     case 'bankTrade': {
       if (state.sub !== 'main' || state.freeRoads) return err('Ahora no.');
-      const n = a.n ?? 1;
-      if (!RES.includes(a.give) || !RES.includes(a.get) || a.give === a.get || !isCount(n) || n < 1) return err('Cambio inválido.');
-      const rate = bankRate(state, pid, a.give);
-      if (me.hand[a.give] < rate * n) return err('No te alcanza.');
-      if (state.bank[a.get] < n) return err('No quedan suficientes en el banco.');
-      pay(state, me, { [a.give]: rate * n });
-      take(state, me, a.get, n);
-      say(state, `${me.name} cambia ${rate * n} ${a.give} por ${n} ${a.get} en el puerto.`);
+      // Formato simple (give/get = recurso, n) o con varias cartas (give/get = {recurso: cantidad}).
+      let give = a.give;
+      let get = a.get;
+      if (typeof give === 'string') {
+        const n = a.n ?? 1;
+        if (!RES.includes(give) || !RES.includes(get) || !isCount(n) || n < 1) return err('Cambio inválido.');
+        give = { [give]: bankRate(state, pid, give) * n };
+        get = { [get]: n };
+      }
+      give = cleanBundle(give);
+      get = cleanBundle(get);
+      if (!give || !get || !total(get)) return err('Cambio inválido.');
+      if (RES.some((r) => give[r] && get[r])) return err('No podés dar y pedir lo mismo.');
+      const credits = bankCredits(state, pid, give);
+      if (credits < 0) return err('Las cartas que das tienen que ir de a grupos según tu puerto.');
+      if (credits !== total(get)) return err(`Con eso te tocan ${credits} cartas del banco.`);
+      if (!canAfford(me.hand, give)) return err('No te alcanza.');
+      if (RES.some((r) => state.bank[r] < get[r])) return err('No quedan suficientes en el banco.');
+      pay(state, me, give);
+      for (const r of RES) if (get[r]) take(state, me, r, get[r]);
+      const list = (b) => RES.filter((r) => b[r]).map((r) => `${b[r]} ${r}`).join(', ');
+      say(state, `${me.name} cambia ${list(give)} por ${list(get)} con el banco.`);
       return OK;
     }
 
@@ -568,12 +595,46 @@ function turnAction(state, me, a, rng) {
   return err('Acción desconocida.');
 }
 
-// Se acabó el tiempo del turno: el juego hace lo mínimo para seguir
-// (descartes, colocación, tirada, yaguareté) y pasa el turno.
 export function turnKey(state) {
   return `${state.turnCount}:${state.turn}:${state.setupQueue.length}`;
 }
 
+// Etapas del reloj: tirar los dados (5 s), descartar con un 7 (15 s) y el turno.
+export function timerStage(state) {
+  if (state.phase === 'play' && state.sub === 'roll') return 'roll';
+  if (state.phase === 'play' && state.sub === 'discard') return 'discard';
+  return 'turn';
+}
+
+export function timerKey(state) {
+  return `${turnKey(state)}:${timerStage(state)}`;
+}
+
+function autoDiscard(state, rng) {
+  for (const id of Object.keys(state.discards).map(Number)) {
+    const hand = state.players[id].hand;
+    const pool = RES.flatMap((r) => Array(hand[r]).fill(r));
+    const cards = zero();
+    for (const r of shuffle(pool, rng).slice(0, state.discards[id])) cards[r]++;
+    applyAction(state, id, { type: 'discard', cards }, rng);
+  }
+}
+
+// Se acabó el tiempo de la etapa actual.
+export function timeoutStage(state, rng = Math.random) {
+  if (state.phase === 'ended') return;
+  const stage = timerStage(state);
+  if (stage === 'roll') {
+    say(state, `${state.players[state.turn].name} no tiró a tiempo: los dados se tiran solos.`);
+    applyAction(state, state.turn, { type: 'roll' }, rng);
+  } else if (stage === 'discard') {
+    const late = Object.keys(state.discards).map((id) => state.players[id].name);
+    say(state, `Se acabó el tiempo para descartar: ${late.join(', ')} descarta${late.length > 1 ? 'n' : ''} al azar.`);
+    autoDiscard(state, rng);
+  } else timeoutTurn(state, rng);
+}
+
+// Se acabó el tiempo del turno: el juego hace lo mínimo para seguir y pasa el turno.
 export function timeoutTurn(state, rng = Math.random) {
   if (state.phase === 'ended') return;
   const key = turnKey(state);
@@ -581,15 +642,8 @@ export function timeoutTurn(state, rng = Math.random) {
   say(state, `Se acabó el tiempo de ${state.players[state.turn].name}.`);
   for (let i = 0; i < 40 && state.phase !== 'ended' && turnKey(state) === key; i++) {
     const pid = state.turn;
-    if (state.sub === 'discard') {
-      for (const id of Object.keys(state.discards).map(Number)) {
-        const hand = state.players[id].hand;
-        const pool = RES.flatMap((r) => Array(hand[r]).fill(r));
-        const cards = zero();
-        for (const r of shuffle(pool, rng).slice(0, state.discards[id])) cards[r]++;
-        applyAction(state, id, { type: 'discard', cards }, rng);
-      }
-    } else if (state.phase === 'setup') {
+    if (state.sub === 'discard') autoDiscard(state, rng);
+    else if (state.phase === 'setup') {
       if (state.sub === 'settlement') applyAction(state, pid, { type: 'buildSettlement', v: pick(validSettlements(state, pid)) }, rng);
       else applyAction(state, pid, { type: 'buildRoad', e: pick(validRoads(state, pid)) }, rng);
     } else if (state.sub === 'roll') {
