@@ -117,6 +117,7 @@ function onMessage(m) {
     if (S.rollId !== lastRoll) {
       lastRoll = S.rollId;
       scene.rollDice(S.dice);
+      startMiniDice();
       rolled = true;
     }
     if (S.flowSeq !== lastFlowSeq) {
@@ -549,7 +550,10 @@ function renderBottom() {
       ${icon(r)}<span class="n">${n}</span><small>${RES_INFO[r].label}</small></div>`;
   }).join('') + (total > 7 && S.phase === 'play' ? `<div class="warn">${total} cartas: ¡cuidado con el 7!</div>` : '');
 
-  const dice = S.dice ? `<div class="dice" title="Última tirada"><span>${S.dice[0]}</span><span>${S.dice[1]}</span></div>` : '';
+  const spinning = performance.now() - miniDiceAt < MINI_DICE_MS;
+  const dice = S.dice
+    ? `<div class="dice ${spinning ? 'spin' : ''}" title="Última tirada: ${S.dice[0] + S.dice[1]}">${S.dice.map((v, i) => `<span class="die" data-i="${i}">${pips(spinning ? 1 + Math.floor(Math.random() * 6) : v)}</span>`).join('')}</div>`
+    : '';
   let html = '';
   if (S.phase === 'play' && myTurn() && S.sub === 'roll') {
     html = `<button class="btn primary big" data-act="roll">Tirar dados</button>`;
@@ -809,6 +813,31 @@ function render() {
     pendingFlows = null;
     setTimeout(() => animateFlows(flows), delay);
   }
+}
+
+// ---------- Dados chicos de la barra ----------
+
+const MINI_DICE_MS = 950;
+let miniDiceAt = -1e9;
+let miniDiceTimer = null;
+const PIP_SPOTS = { 1: [5], 2: [3, 7], 3: [3, 5, 7], 4: [1, 3, 7, 9], 5: [1, 3, 5, 7, 9], 6: [1, 3, 4, 6, 7, 9] };
+const pips = (n) => `<i class="pips">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((k) => `<b class="${PIP_SPOTS[n].includes(k) ? 'on' : ''}"></b>`).join('')}</i>`;
+
+// Mientras ruedan los dados del tablero, los de la barra giran y cambian de cara.
+function startMiniDice() {
+  miniDiceAt = performance.now();
+  clearInterval(miniDiceTimer);
+  miniDiceTimer = setInterval(() => {
+    const done = performance.now() - miniDiceAt >= MINI_DICE_MS;
+    document.querySelectorAll('.dice .die').forEach((el) => {
+      el.innerHTML = pips(done ? S.dice[Number(el.dataset.i)] : 1 + Math.floor(Math.random() * 6));
+    });
+    if (done) {
+      clearInterval(miniDiceTimer);
+      document.querySelector('.dice')?.classList.remove('spin');
+      document.querySelector('.dice')?.classList.add('land');
+    }
+  }, 80);
 }
 
 // ---------- Banco ----------
