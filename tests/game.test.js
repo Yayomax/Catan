@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createGame, applyAction, viewFor, validSettlements, validRoads, validCities,
-  validJaguarTiles, stealCandidates, canAfford, bankRate, COSTS, RES, WIN_POINTS, timeoutTurn, turnKey,
+  validJaguarTiles, stealCandidates, canAfford, bankRate, COSTS, RES, WIN_POINTS, timeoutTurn, turnKey, newFlows,
 } from '../shared/game.js';
 import { buildBoard, spiralOrder } from '../shared/board.js';
 
@@ -325,4 +325,31 @@ test('banco de recursos: 19 de cada uno y regla de escasez', () => {
   me.hand.madera = 4;
   g.bank.madera -= 4;
   assert.ok(applyAction(g, g.turn, { type: 'bankTrade', give: 'madera', get: 'piedra', n: 1 }, rng).error);
+});
+
+test('movimientos de cartas para animar, con el robo oculto a terceros', () => {
+  const rng = rngFrom(41);
+  const s = mk(3, 41);
+  doSetup(s, rng);
+  // La colocación dio recursos desde el banco.
+  s.sub = 'main';
+  const p = s.turn;
+  s.players[p].hand = { madera: 1, ladrillo: 1, lana: 0, trigo: 0, piedra: 0 };
+  newFlows(s);
+  must(s, p, { type: 'buildRoad', e: validRoads(s, p)[0] }, rng);
+  assert.deepEqual(s.flows, [
+    { from: p, to: 'bank', res: 'madera', n: 1 },
+    { from: p, to: 'bank', res: 'ladrillo', n: 1 },
+  ]);
+  // Robo: solo ladrón y víctima ven qué recurso fue.
+  newFlows(s);
+  const victim = (p + 1) % 3;
+  const third = (p + 2) % 3;
+  s.flows.push({ from: victim, to: p, res: 'lana', n: 1, secret: true });
+  assert.equal(viewFor(s, p).flows[0].res, 'lana');
+  assert.equal(viewFor(s, victim).flows[0].res, 'lana');
+  assert.equal(viewFor(s, third).flows[0].res, null);
+  // Banco oculto: no viaja en la vista.
+  assert.equal(viewFor(s, p, false, { hideBank: true }).bank, undefined);
+  assert.ok(viewFor(s, p).bank);
 });

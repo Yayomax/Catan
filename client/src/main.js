@@ -23,6 +23,9 @@ let mode = null; // 'road' | 'settlement' | 'city'
 let modal = null; // { kind, ...datos }
 let lastRoll = 0;
 let logOpen = false;
+let bankOpen = false;
+let lastFlowSeq = null;
+let pendingFlows = null;
 let connected = false;
 let timer = null; // { deadline, total } en hora del servidor
 let clockOffset = 0; // hora del servidor - hora local
@@ -71,6 +74,7 @@ function onMessage(m) {
       board = m.s.board;
       scene.setBoard(board);
       lastRoll = m.s.rollId;
+      lastFlowSeq = m.s.flowSeq;
       modal = null;
       mode = null;
     }
@@ -81,9 +85,16 @@ function onMessage(m) {
     clockOffset = m.now - Date.now();
     S = { ...m.s, board };
     scene.sync(S);
+    let rolled = false;
     if (S.rollId !== lastRoll) {
       lastRoll = S.rollId;
       scene.rollDice(S.dice);
+      rolled = true;
+    }
+    if (S.flowSeq !== lastFlowSeq) {
+      lastFlowSeq = S.flowSeq;
+      // Lo que cobra una tirada vuela cuando los dados terminan de rodar.
+      if (S.flows.length) pendingFlows = { flows: S.flows, delay: rolled ? 1150 : 0 };
     }
     if (!canUseMode()) mode = null;
   } else if (m.t === 'error') {
@@ -206,6 +217,13 @@ function renderScreen() {
           : `<b>${fmtSecs(lobby.settings.turnSeconds)}</b>`}
         ${lobby.settings.turnSeconds ? '<small>Cada construcción, carta o intercambio suma 10 s. Si se acaba el tiempo, el turno se completa solo.</small>' : ''}
       </div>
+      <div class="setting">
+        <span>Mostrar cuántas cartas quedan en el banco</span>
+        ${host
+          ? `<div class="opts">${[[true, 'Sí'], [false, 'No']].map(([v, l]) => `<button class="opt ${lobby.settings.showBank === v ? 'on' : ''}" data-act="setBank" data-v="${v ? 1 : 0}">${l}</button>`).join('')}</div>`
+          : `<b>${lobby.settings.showBank ? 'Sí' : 'No'}</b>`}
+        ${lobby.settings.showBank ? '' : '<small>Nadie ve las cantidades del banco: hay que llevar la cuenta de memoria.</small>'}
+      </div>
       <ul class="roster">${lobby.players
         .map((p, i) => `<li><span class="dot" style="background:${p.color}"></span>${esc(p.name)}${i === 0 ? ' <em>anfitrión</em>' : ''}${i === you ? ' <em>vos</em>' : ''}<span class="rdy ${p.ready ? 'on' : ''}">${p.ready ? 'Listo' : 'Esperando'}</span></li>`)
         .join('')}</ul>
@@ -240,7 +258,7 @@ function renderPlayers() {
         const tags = [];
         if (S.longest === p.id) tags.push('<span class="tag">Picada larga</span>');
         if (S.largest === p.id) tags.push('<span class="tag">Baqueanía</span>');
-        return `<div class="player ${S.turn === p.id && S.phase !== 'ended' ? 'turn' : ''} ${online[p.id] ? '' : 'off'}" style="--c:${p.color}">
+        return `<div class="player ${S.turn === p.id && S.phase !== 'ended' ? 'turn' : ''} ${online[p.id] ? '' : 'off'}" data-pid="${p.id}" style="--c:${p.color}">
           <div class="who"><span class="dot"></span><b>${esc(p.name)}</b>${p.id === you ? '<em>vos</em>' : ''}</div>
           <div class="stats">
             <span class="pts" title="Puntos">${p.points}<small>/${WIN_POINTS}</small></span>
@@ -255,6 +273,7 @@ function renderPlayers() {
       .join('') +
     `<div class="tools">
       <button class="chip" data-act="rules">Reglas</button>
+      <button class="chip only-narrow ${bankOpen ? 'on' : ''}" data-act="bankPanel" id="bankBtn">Banco</button>
       <button class="chip only-narrow" data-act="log">Crónica</button>
       <span class="room">Sala ${esc(lobby.code)}</span>
     </div>`;
@@ -276,10 +295,9 @@ function costRow(cost) {
 function renderBottom() {
   const hand = me().hand;
   $('hand').innerHTML = RES.map(
-    (r) => `<div class="card ${hand[r] ? '' : 'empty'}" style="--c:${RES_INFO[r].color}">
-      ${icon(r)}<span class="n">${hand[r]}</span><small>${RES_INFO[r].label}</small>
-      <span class="bank ${S.bank[r] <= 3 ? 'low' : ''}" title="Quedan ${S.bank[r]} en el banco">${S.bank[r]}</span></div>`,
-  ).join('') + `<div class="bank-legend" title="Cartas que quedan en el banco de cada recurso">banco</div>`;
+    (r) => `<div class="card ${hand[r] ? '' : 'empty'}" data-r="${r}" style="--c:${RES_INFO[r].color}">
+      ${icon(r)}<span class="n">${hand[r]}</span><small>${RES_INFO[r].label}</small></div>`,
+  ).join('');
 
   const dice = S.dice ? `<div class="dice" title="Última tirada"><span>${S.dice[0]}</span><span>${S.dice[1]}</span></div>` : '';
   let html = '';
@@ -353,11 +371,11 @@ function modalHTML() {
     const { give, get } = modal;
     const g = RES.filter((r) => give[r]);
     const w = RES.filter((r) => get[r]);
-    const bankOk = g.length === 1 && w.length === 1 && g[0] !== w[0] && give[g[0]] === bankRate(S, you, g[0]) * get[w[0]] && S.bank[w[0]] >= get[w[0]];
+    const bankOk = g.length === 1 && w.length === 1 && g[0] !== w[0] && give[g[0]] === bankRate(S, you, g[0]) * get[w[0]] && (!S.bank || S.bank[w[0]] >= get[w[0]]);
     const offerOk = g.length && w.length && !g.some((r) => get[r]);
     return `${close}<h2>Comerciar</h2>
       <h4>Das</h4>${picker('give', give, (r) => me().hand[r], (r) => `puerto ${bankRate(S, you, r)}:1`)}
-      <h4>Pedís</h4>${picker('get', get, () => 9, (r) => `banco ${S.bank[r]}`)}
+      <h4>Pedís</h4>${picker('get', get, () => 9, S.bank ? (r) => `banco ${S.bank[r]}` : null)}
       <div class="row">
         <button class="btn primary" data-act="offer" ${offerOk ? '' : 'disabled'}>Ofrecer a los jugadores</button>
         <button class="btn" data-act="bank" ${bankOk ? '' : 'disabled'}>Cambiar en el puerto</button>
@@ -402,7 +420,7 @@ function modalHTML() {
   if (modal.kind === 'cosecha') {
     const n = sum(modal.pick);
     return `${close}<h2>Cosecha</h2><p>Elegí 2 recursos.</p>
-      ${picker('pick', modal.pick, (r) => Math.min(S.bank[r], modal.pick[r] + 2 - n), (r) => `banco ${S.bank[r]}`)}
+      ${picker('pick', modal.pick, (r) => Math.min(S.bank ? S.bank[r] : 2, modal.pick[r] + 2 - n), S.bank ? (r) => `banco ${S.bank[r]}` : null)}
       <button class="btn primary" data-act="cosecha" ${n === 2 ? '' : 'disabled'}>Tomar</button>`;
   }
 
@@ -441,11 +459,94 @@ function render() {
     $('status').innerHTML = `<span class="${myTurn() || S.discards[you] ? 'mine' : ''}">${statusText()}<b id="clock"></b></span>`;
     tickClock();
     renderLog();
+    renderBank();
     renderBottom();
     renderTradeBar();
   }
   renderModal();
   updateHighlights();
+  if (pendingFlows) {
+    const { flows, delay } = pendingFlows;
+    pendingFlows = null;
+    setTimeout(() => animateFlows(flows), delay);
+  }
+}
+
+// ---------- Banco ----------
+
+function renderBank() {
+  const el = $('bank');
+  el.className = bankOpen ? 'open' : '';
+  const shown = !!S.bank;
+  el.innerHTML = `<h3>Banco ${shown ? '' : '<small>oculto</small>'}<button class="x only-narrow" data-act="bankPanel" aria-label="cerrar">×</button></h3>
+    <div class="stacks">${RES.map((r) => {
+      const n = shown ? S.bank[r] : null;
+      return `<div class="stack ${n === 0 ? 'empty' : ''} ${n !== null && n <= 3 ? 'low' : ''}" data-r="${r}" style="--c:${RES_INFO[r].color}" title="${RES_INFO[r].label}">
+        <div class="mini-card">${icon(r)}</div><b>${n === null ? '?' : n}</b><small>${RES_INFO[r].label}</small></div>`;
+    }).join('')}</div>`;
+}
+
+// ---------- Animación de cartas ----------
+
+const visible = (el) => el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+
+function anchorFor(who, res) {
+  if (who === 'bank') {
+    const slot = document.querySelector(`#bank .stack[data-r="${res}"]`);
+    if (visible(slot) && visible($('bank'))) return slot;
+    if (visible($('bankBtn'))) return $('bankBtn');
+    return $('status');
+  }
+  if (who === you) return document.querySelector(`#hand .card[data-r="${res}"]`) || $('hand');
+  return document.querySelector(`.player[data-pid="${who}"]`);
+}
+
+function animateFlows(flows) {
+  if (!S || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  let k = 0;
+  for (const f of flows) {
+    const from = anchorFor(f.from, f.res);
+    const to = anchorFor(f.to, f.res);
+    if (!from || !to) continue;
+    for (let i = 0; i < Math.min(f.n, 6); i++) flyCard(f.res, from, to, k++ * 110);
+  }
+}
+
+function flyCard(res, from, to, delay) {
+  const a = from.getBoundingClientRect();
+  const b = to.getBoundingClientRect();
+  const card = document.createElement('div');
+  card.className = `fly ${res ? '' : 'back'}`;
+  if (res) {
+    card.style.setProperty('--c', RES_INFO[res].color);
+    card.innerHTML = icon(res);
+  }
+  const x0 = a.left + a.width / 2 - 22;
+  const y0 = a.top + a.height / 2 - 30;
+  const x1 = b.left + b.width / 2 - 22;
+  const y1 = b.top + b.height / 2 - 30;
+  card.style.left = `${x0}px`;
+  card.style.top = `${y0}px`;
+  card.style.opacity = '0';
+  document.body.appendChild(card);
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const lift = -Math.min(120, 40 + Math.abs(dx) * 0.15);
+  const anim = card.animate(
+    [
+      { transform: 'translate(0, 0) scale(0.7) rotate(-8deg)', opacity: 0 },
+      { transform: `translate(${dx * 0.5}px, ${dy * 0.5 + lift}px) scale(1.15) rotate(4deg)`, opacity: 1, offset: 0.45 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.85) rotate(0deg)`, opacity: 1 },
+    ],
+    { duration: 720, delay, easing: 'cubic-bezier(.35,.1,.25,1)', fill: 'forwards' },
+  );
+  anim.onfinish = () => {
+    card.remove();
+    to.classList.remove('pop');
+    void to.offsetWidth;
+    to.classList.add('pop');
+    setTimeout(() => to.classList.remove('pop'), 350);
+  };
 }
 
 // ---------- Acciones de la interfaz ----------
@@ -481,6 +582,12 @@ const ACT = {
   start: () => send({ t: 'start' }),
   ready: (d) => send({ t: 'ready', v: d.v === '1' }),
   setTime: (d) => send({ t: 'settings', turnSeconds: Number(d.n) }),
+  setBank: (d) => send({ t: 'settings', showBank: d.v === '1' }),
+  bankPanel: () => {
+    bankOpen = !bankOpen;
+    if (bankOpen) logOpen = false;
+    render();
+  },
   copy: async () => {
     const url = `${location.origin}/?sala=${lobby.code}`;
     try {
@@ -514,6 +621,7 @@ const ACT = {
   },
   log: () => {
     logOpen = !logOpen;
+    if (logOpen) bankOpen = false;
     render();
   },
   close: closeModal,

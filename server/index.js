@@ -7,7 +7,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { createGame, applyAction, viewFor, timeoutTurn, turnKey } from '../shared/game.js';
+import { createGame, applyAction, viewFor, timeoutTurn, turnKey, newFlows } from '../shared/game.js';
 
 const PORT = Number(process.env.PORT) || 3001;
 const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
@@ -93,7 +93,7 @@ function broadcast(room) {
       settings: room.settings,
       timer: room.deadline ? { deadline: room.deadline, total: room.settings.turnSeconds * 1000 } : null,
       now: Date.now(),
-      s: viewFor(room.game, i, withBoard),
+      s: viewFor(room.game, i, withBoard, { hideBank: !room.settings.showBank }),
     });
   });
 }
@@ -126,6 +126,7 @@ function schedule(room) {
 function onTimeout(room) {
   room.timer = null;
   if (!room.game || room.game.phase === 'ended') return;
+  newFlows(room.game);
   timeoutTurn(room.game);
   schedule(room);
   broadcast(room);
@@ -155,7 +156,7 @@ function handle(ws, m) {
   if (m.t === 'create' || m.t === 'join') {
     let room;
     if (m.t === 'create') {
-      room = { code: newCode(), players: [], game: null, touched: Date.now(), settings: { turnSeconds: 0 }, timer: null, deadline: null, turnKey: null };
+      room = { code: newCode(), players: [], game: null, touched: Date.now(), settings: { turnSeconds: 0, showBank: true }, timer: null, deadline: null, turnKey: null };
       rooms.set(room.code, room);
     } else {
       room = rooms.get(String(m.code || '').toUpperCase());
@@ -187,9 +188,12 @@ function handle(ws, m) {
   if (m.t === 'settings') {
     if (ws.index !== 0) return fail('Solo quien creó la sala cambia la configuración.');
     if (room.game && room.game.phase !== 'ended') return fail('La partida ya empezó.');
-    const secs = Number(m.turnSeconds);
-    if (!TURN_OPTIONS.includes(secs)) return fail('Tiempo inválido.');
-    room.settings.turnSeconds = secs;
+    if (m.turnSeconds !== undefined) {
+      const secs = Number(m.turnSeconds);
+      if (!TURN_OPTIONS.includes(secs)) return fail('Tiempo inválido.');
+      room.settings.turnSeconds = secs;
+    }
+    if (m.showBank !== undefined) room.settings.showBank = !!m.showBank;
     return broadcast(room);
   }
 
@@ -215,6 +219,7 @@ function handle(ws, m) {
     if (!room.game) return fail('La partida no empezó.');
     const g = room.game;
     const wasTurn = g.turn === ws.index && g.phase === 'play';
+    newFlows(g);
     const r = applyAction(g, ws.index, m.a);
     if (r.error) return fail(r.error);
     if (wasTurn && m.a && BONUS_ACTIONS.has(m.a.type)) addBonus(room);

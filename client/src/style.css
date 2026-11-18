@@ -59,7 +59,7 @@ small { font-size: 0.72em; }
 #status span.mine { background: linear-gradient(#f6e9c4, #e4cf98); color: var(--ink); border-color: var(--wood-edge); font-weight: bold; }
 
 #log {
-  grid-row: 3; justify-self: end; align-self: start; width: 250px; max-height: min(46vh, 380px); margin: 8px 10px 0 0;
+  grid-row: 3; grid-column: 1; justify-self: end; align-self: start; width: 250px; max-height: min(46vh, 380px); margin: 8px 10px 0 0;
   display: flex; flex-direction: column; border-radius: 10px; overflow: hidden;
   background: linear-gradient(var(--paper), var(--paper-2)); border: 2px solid var(--wood-edge); box-shadow: 0 6px 18px #0008;
 }
@@ -233,12 +233,43 @@ small { font-size: 0.72em; }
 #timebar.flash i { background: #7ee08a; box-shadow: 0 0 16px #7ee08a; }
 #timebar.flash span { background: #2f7a3a; }
 
-#hand { position: relative; padding-bottom: 14px; }
-.card .bank {
-  position: absolute; bottom: -13px; left: 50%; transform: translateX(-50%); min-width: 24px; padding: 0 5px; border-radius: 99px;
-  background: #1c100a; color: #e9d9b4; border: 1px solid #5b3d20; font-size: 0.68rem; line-height: 15px; text-align: center; font-variant-numeric: tabular-nums;
+
+/* ---------- Banco ---------- */
+#bank {
+  grid-row: 3; grid-column: 1; justify-self: start; align-self: start; margin: 8px 0 0 10px; width: 132px;
+  border-radius: 10px; overflow: hidden; background: linear-gradient(160deg, var(--wood-2), var(--wood));
+  border: 2px solid var(--wood-edge); box-shadow: 0 6px 18px #0008; color: #f2e4c4;
 }
-.card.empty .bank { filter: none; }
-.card .bank.low { background: #8c2a1d; color: #fff; border-color: #c4553f; }
-.bank-legend { align-self: flex-end; margin: 0 0 -13px 2px; font-size: 0.68rem; color: #e9d9b4aa; }
-@media (max-width: 860px) { .bank-legend { display: none; } }
+#bank h3 { margin: 0; padding: 6px 10px; font-size: 0.95rem; display: flex; align-items: center; justify-content: space-between; gap: 6px; background: #0003; }
+#bank h3 small { font-weight: normal; opacity: 0.6; margin-right: auto; }
+#bank .x { position: static; color: var(--paper); font-size: 1.3rem; padding: 0 4px; }
+#bank .stacks { display: grid; gap: 6px; padding: 8px; }
+.stack { display: grid; grid-template-columns: 40px 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; border-radius: 8px; padding: 2px; transition: transform 0.15s; }
+.stack .mini-card {
+  grid-row: span 2; width: 40px; height: 52px; border-radius: 6px; display: grid; place-items: center; position: relative;
+  background: linear-gradient(165deg, #fbf3da, #e7d5a6); outline: 2px solid var(--c); outline-offset: -4px;
+  box-shadow: 2px 2px 0 #c9b37f, 4px 4px 0 #a88f5c, 0 4px 8px #0008;
+}
+.stack .mini-card .ico { width: 26px; height: 26px; }
+.stack b { font-size: 1.25rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.stack small { font-size: 0.68rem; opacity: 0.7; }
+.stack.low b { color: #ff8a73; }
+.stack.empty .mini-card { filter: grayscale(1); opacity: 0.45; box-shadow: none; }
+.chip.on { border-color: var(--gold); background: var(--wood); }
+
+/* Cartas en vuelo */
+.fly {
+  position: fixed; z-index: 20; width: 44px; height: 60px; border-radius: 7px; pointer-events: none; display: grid; place-items: center;
+  background: linear-gradient(165deg, #fbf3da, #e7d5a6); outline: 2px solid var(--c, #8a6234); outline-offset: -4px;
+  box-shadow: 0 8px 18px #000a;
+}
+.fly svg { width: 28px; height: 28px; }
+.fly.back { background: repeating-linear-gradient(45deg, #6b4526 0 6px, #5a3a20 6px 12px); outline-color: var(--gold); }
+.pop { animation: pop 0.35s ease-out; }
+@keyframes pop { 40% { transform: scale(1.12); filter: brightness(1.25); } }
+
+@media (max-width: 860px) {
+  #bank { display: none; position: fixed; z-index: 4; top: 92px; left: 8px; margin: 0; width: 170px; }
+  #bank.open { display: block; animation: drop 0.18s ease-out; }
+  @keyframes drop { from { transform: translateY(-8px); opacity: 0; } }
+}

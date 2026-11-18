@@ -69,6 +69,8 @@ export function createGame(players, rng = Math.random) {
     buildings: {},
     roads: {},
     deck: shuffle(deck, rng),
+    flows: [],
+    flowSeq: 0,
     bank: Object.fromEntries(RES.map((r) => [r, BANK_SIZE[layoutFor(n)]])),
     discards: {},
     freeRoads: 0,
@@ -208,10 +210,17 @@ function say(state, text) {
 }
 
 // Pagar devuelve las cartas al banco; cobrar las saca del banco.
+// Movimientos de cartas de la última acción, para animarlos en pantalla.
+// from/to: id de jugador o 'bank'. secret: solo lo ven los involucrados.
+function flow(state, from, to, res, n = 1, secret = false) {
+  if (n > 0) state.flows.push({ from, to, res, n, ...(secret ? { secret: true } : {}) });
+}
+
 function pay(state, player, cost) {
   for (const r of RES) {
     player.hand[r] -= cost[r] || 0;
     state.bank[r] += cost[r] || 0;
+    flow(state, player.id, 'bank', r, cost[r] || 0);
   }
 }
 
@@ -219,6 +228,7 @@ function take(state, player, res, n = 1) {
   const k = Math.min(n, state.bank[res]);
   state.bank[res] -= k;
   player.hand[res] += k;
+  flow(state, 'bank', player.id, res, k);
   return k;
 }
 
@@ -399,6 +409,7 @@ function turnAction(state, me, a, rng) {
         const res = pool[Math.floor(rng() * pool.length)];
         v.hand[res]--;
         me.hand[res]++;
+        flow(state, v.id, pid, res, 1, true);
         say(state, `${me.name} le quita una carta a ${v.name}.`);
       }
       state.sub = state.afterJaguar;
@@ -482,6 +493,7 @@ function turnAction(state, me, a, rng) {
         for (const p of state.players) {
           if (p.id === pid) continue;
           got += p.hand[a.res];
+          flow(state, p.id, pid, a.res, p.hand[a.res]);
           p.hand[a.res] = 0;
         }
         me.hand[a.res] += got;
@@ -528,6 +540,8 @@ function turnAction(state, me, a, rng) {
       for (const r of RES) {
         me.hand[r] += t.get[r] - t.give[r];
         other.hand[r] += t.give[r] - t.get[r];
+        flow(state, pid, other.id, r, t.give[r]);
+        flow(state, other.id, pid, r, t.get[r]);
       }
       state.trade = null;
       say(state, `${me.name} y ${other.name} cierran un trueque.`);
@@ -591,10 +605,18 @@ export function timeoutTurn(state, rng = Math.random) {
 }
 
 // Estado tal como lo ve un jugador: sin manos ajenas ni mazo.
-export function viewFor(state, pid, withBoard) {
-  const { board, deck, players, ...rest } = state;
+// Empieza un lote nuevo de movimientos (lo llama el servidor antes de cada acción).
+export function newFlows(state) {
+  state.flows = [];
+  state.flowSeq++;
+}
+
+export function viewFor(state, pid, withBoard, opts = {}) {
+  const { board, deck, players, bank, flows, ...rest } = state;
   return {
     ...rest,
+    bank: opts.hideBank ? undefined : bank,
+    flows: flows.map((f) => (f.secret && f.from !== pid && f.to !== pid && state.phase !== 'ended' ? { ...f, res: null } : f)),
     board: withBoard ? board : undefined,
     deckCount: deck.length,
     players: players.map((p) => {
