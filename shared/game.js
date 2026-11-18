@@ -20,6 +20,8 @@ const DECKS = {
   base: { baqueano: 14, fiesta: 5, picada: 2, cosecha: 2, feria: 2 },
   grande: { baqueano: 20, fiesta: 5, picada: 3, cosecha: 3, feria: 3 },
 };
+// Cartas de cada recurso en el banco.
+export const BANK_SIZE = { base: 19, grande: 24 };
 
 const zero = () => Object.fromEntries(RES.map((r) => [r, 0]));
 const total = (h) => RES.reduce((s, r) => s + (h[r] || 0), 0);
@@ -67,6 +69,7 @@ export function createGame(players, rng = Math.random) {
     buildings: {},
     roads: {},
     deck: shuffle(deck, rng),
+    bank: Object.fromEntries(RES.map((r) => [r, BANK_SIZE[layoutFor(n)]])),
     discards: {},
     freeRoads: 0,
     playedCard: false,
@@ -204,8 +207,19 @@ function say(state, text) {
   if (state.log.length > 80) state.log.shift();
 }
 
-function pay(player, cost) {
-  for (const r of RES) player.hand[r] -= cost[r] || 0;
+// Pagar devuelve las cartas al banco; cobrar las saca del banco.
+function pay(state, player, cost) {
+  for (const r of RES) {
+    player.hand[r] -= cost[r] || 0;
+    state.bank[r] += cost[r] || 0;
+  }
+}
+
+function take(state, player, res, n = 1) {
+  const k = Math.min(n, state.bank[res]);
+  state.bank[res] -= k;
+  player.hand[res] += k;
+  return k;
 }
 
 function awardTitle(state, field, stat, min, label) {
@@ -248,9 +262,21 @@ function produce(state, sum) {
       if (b) gains[b.p][res] += b.type === 'city' ? 2 : 1;
     }
   }
+  // Si el banco no alcanza para todos los que cobran un recurso, nadie lo
+  // cobra; si cobra uno solo, se lleva lo que quede.
+  for (const r of RES) {
+    const takers = state.players.filter((p) => gains[p.id][r] > 0);
+    const want = takers.reduce((n, p) => n + gains[p.id][r], 0);
+    if (want <= state.bank[r]) continue;
+    if (takers.length === 1) gains[takers[0].id][r] = state.bank[r];
+    else {
+      for (const p of takers) gains[p.id][r] = 0;
+      say(state, `No alcanza la ${r} del banco: nadie la cobra.`);
+    }
+  }
   state.players.forEach((p, i) => {
+    for (const r of RES) if (gains[i][r]) take(state, p, r, gains[i][r]);
     const parts = RES.filter((r) => gains[i][r]).map((r) => `${gains[i][r]} ${r}`);
-    for (const r of RES) p.hand[r] += gains[i][r];
     if (parts.length) say(state, `${p.name} recibe ${parts.join(', ')}.`);
   });
 }
@@ -279,7 +305,7 @@ function discard(state, me, a) {
   if (!need) return err('No tenés que descartar.');
   const cards = cleanBundle(a.cards);
   if (!cards || total(cards) !== need || !canAfford(me.hand, cards)) return err(`Tenés que descartar ${need} cartas.`);
-  pay(me, cards);
+  pay(state, me, cards);
   delete state.discards[me.id];
   say(state, `${me.name} descarta ${need} cartas.`);
   if (!Object.keys(state.discards).length) state.sub = 'jaguar';
@@ -307,7 +333,7 @@ function turnAction(state, me, a, rng) {
         // Segundo rancho: recibe un recurso por cada terreno vecino.
         for (const t of state.board.vertices[a.v].tiles) {
           const res = TERRAIN_RES[state.board.tiles[t].terrain];
-          if (res) me.hand[res]++;
+          if (res) take(state, me, res);
         }
       }
       say(state, `${me.name} funda un rancho.`);
@@ -386,7 +412,7 @@ function turnAction(state, me, a, rng) {
       if (!free && !canAfford(me.hand, COSTS.road)) return err('No te alcanza.');
       if (!roadSpotOk(state, a.e, pid)) return err('Ahí no se puede.');
       if (free) state.freeRoads--;
-      else pay(me, COSTS.road);
+      else pay(state, me, COSTS.road);
       state.roads[a.e] = pid;
       if (state.freeRoads > 0 && (piecesLeft(state, pid).road <= 0 || !validRoads(state, pid).length)) state.freeRoads = 0;
       say(state, `${me.name} abre un camino.`);
@@ -399,7 +425,7 @@ function turnAction(state, me, a, rng) {
       if (piecesLeft(state, pid).settlement <= 0) return err('No te quedan ranchos.');
       if (!canAfford(me.hand, COSTS.settlement)) return err('No te alcanza.');
       if (!settlementSpotOk(state, a.v, pid, true)) return err('Ahí no se puede.');
-      pay(me, COSTS.settlement);
+      pay(state, me, COSTS.settlement);
       state.buildings[a.v] = { p: pid, type: 'settlement' };
       say(state, `${me.name} funda un rancho.`);
       refreshRoads(state);
@@ -412,7 +438,7 @@ function turnAction(state, me, a, rng) {
       if (!canAfford(me.hand, COSTS.city)) return err('No te alcanza.');
       const b = state.buildings[a.v];
       if (!b || b.p !== pid || b.type !== 'settlement') return err('Ahí no hay un rancho tuyo.');
-      pay(me, COSTS.city);
+      pay(state, me, COSTS.city);
       b.type = 'city';
       say(state, `${me.name} levanta un pueblo.`);
       return OK;
@@ -422,7 +448,7 @@ function turnAction(state, me, a, rng) {
       if (state.sub !== 'main' || state.freeRoads) return err('Ahora no.');
       if (!state.deck.length) return err('No quedan cartas.');
       if (!canAfford(me.hand, COSTS.card)) return err('No te alcanza.');
-      pay(me, COSTS.card);
+      pay(state, me, COSTS.card);
       me.newDev.push(state.deck.pop());
       say(state, `${me.name} compra una carta de oficio.`);
       return OK;
@@ -446,8 +472,9 @@ function turnAction(state, me, a, rng) {
         say(state, `${me.name} abre una picada: ${n} caminos gratis.`);
       } else if (card === 'cosecha') {
         if (!RES.includes(a.a) || !RES.includes(a.b)) return err('Elegí dos recursos.');
-        me.hand[a.a]++;
-        me.hand[a.b]++;
+        if (state.bank[a.a] < (a.a === a.b ? 2 : 1) || state.bank[a.b] < 1) return err('No quedan esos recursos en el banco.');
+        take(state, me, a.a);
+        take(state, me, a.b);
         say(state, `${me.name} levanta la cosecha: ${a.a} y ${a.b}.`);
       } else if (card === 'feria') {
         if (!RES.includes(a.res)) return err('Elegí un recurso.');
@@ -471,8 +498,9 @@ function turnAction(state, me, a, rng) {
       if (!RES.includes(a.give) || !RES.includes(a.get) || a.give === a.get || !isCount(n) || n < 1) return err('Cambio inválido.');
       const rate = bankRate(state, pid, a.give);
       if (me.hand[a.give] < rate * n) return err('No te alcanza.');
-      me.hand[a.give] -= rate * n;
-      me.hand[a.get] += n;
+      if (state.bank[a.get] < n) return err('No quedan suficientes en el banco.');
+      pay(state, me, { [a.give]: rate * n });
+      take(state, me, a.get, n);
       say(state, `${me.name} cambia ${rate * n} ${a.give} por ${n} ${a.get} en el puerto.`);
       return OK;
     }

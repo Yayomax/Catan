@@ -277,8 +277,9 @@ function renderBottom() {
   const hand = me().hand;
   $('hand').innerHTML = RES.map(
     (r) => `<div class="card ${hand[r] ? '' : 'empty'}" style="--c:${RES_INFO[r].color}">
-      ${icon(r)}<span class="n">${hand[r]}</span><small>${RES_INFO[r].label}</small></div>`,
-  ).join('');
+      ${icon(r)}<span class="n">${hand[r]}</span><small>${RES_INFO[r].label}</small>
+      <span class="bank ${S.bank[r] <= 3 ? 'low' : ''}" title="Quedan ${S.bank[r]} en el banco">${S.bank[r]}</span></div>`,
+  ).join('') + `<div class="bank-legend" title="Cartas que quedan en el banco de cada recurso">banco</div>`;
 
   const dice = S.dice ? `<div class="dice" title="Última tirada"><span>${S.dice[0]}</span><span>${S.dice[1]}</span></div>` : '';
   let html = '';
@@ -352,11 +353,11 @@ function modalHTML() {
     const { give, get } = modal;
     const g = RES.filter((r) => give[r]);
     const w = RES.filter((r) => get[r]);
-    const bankOk = g.length === 1 && w.length === 1 && g[0] !== w[0] && give[g[0]] === bankRate(S, you, g[0]) * get[w[0]];
+    const bankOk = g.length === 1 && w.length === 1 && g[0] !== w[0] && give[g[0]] === bankRate(S, you, g[0]) * get[w[0]] && S.bank[w[0]] >= get[w[0]];
     const offerOk = g.length && w.length && !g.some((r) => get[r]);
     return `${close}<h2>Comerciar</h2>
       <h4>Das</h4>${picker('give', give, (r) => me().hand[r], (r) => `puerto ${bankRate(S, you, r)}:1`)}
-      <h4>Pedís</h4>${picker('get', get, () => 9)}
+      <h4>Pedís</h4>${picker('get', get, () => 9, (r) => `banco ${S.bank[r]}`)}
       <div class="row">
         <button class="btn primary" data-act="offer" ${offerOk ? '' : 'disabled'}>Ofrecer a los jugadores</button>
         <button class="btn" data-act="bank" ${bankOk ? '' : 'disabled'}>Cambiar en el puerto</button>
@@ -401,7 +402,7 @@ function modalHTML() {
   if (modal.kind === 'cosecha') {
     const n = sum(modal.pick);
     return `${close}<h2>Cosecha</h2><p>Elegí 2 recursos.</p>
-      ${picker('pick', modal.pick, (r) => modal.pick[r] + 2 - n)}
+      ${picker('pick', modal.pick, (r) => Math.min(S.bank[r], modal.pick[r] + 2 - n), (r) => `banco ${S.bank[r]}`)}
       <button class="btn primary" data-act="cosecha" ${n === 2 ? '' : 'disabled'}>Tomar</button>`;
   }
 

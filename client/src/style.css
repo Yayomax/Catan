@@ -232,3 +232,13 @@ small { font-size: 0.72em; }
 #timebar.low span { background: #b3261e; }
 #timebar.flash i { background: #7ee08a; box-shadow: 0 0 16px #7ee08a; }
 #timebar.flash span { background: #2f7a3a; }
+
+#hand { position: relative; padding-bottom: 14px; }
+.card .bank {
+  position: absolute; bottom: -13px; left: 50%; transform: translateX(-50%); min-width: 24px; padding: 0 5px; border-radius: 99px;
+  background: #1c100a; color: #e9d9b4; border: 1px solid #5b3d20; font-size: 0.68rem; line-height: 15px; text-align: center; font-variant-numeric: tabular-nums;
+}
+.card.empty .bank { filter: none; }
+.card .bank.low { background: #8c2a1d; color: #fff; border-color: #c4553f; }
+.bank-legend { align-self: flex-end; margin: 0 0 -13px 2px; font-size: 0.68rem; color: #e9d9b4aa; }
+@media (max-width: 860px) { .bank-legend { display: none; } }

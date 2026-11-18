@@ -222,6 +222,11 @@ test('partidas completas al azar terminan con un ganador válido', () => {
         must(s, p, { type: 'endTurn' }, rng);
       }
       for (const pl of s.players) for (const r of RES) assert.ok(pl.hand[r] >= 0, 'mano negativa');
+      const size = n > 4 ? 24 : 19;
+      for (const r of RES) {
+        assert.ok(s.bank[r] >= 0, 'banco negativo');
+        assert.equal(s.bank[r] + s.players.reduce((k, pl) => k + pl.hand[r], 0), size, `se perdieron o crearon cartas de ${r}`);
+      }
     }
     assert.equal(s.phase, 'ended', `seed ${seed} no terminó`);
     assert.ok(viewFor(s, 0).players[s.winner].points >= WIN_POINTS);
@@ -271,4 +276,53 @@ test('si se acaba el tiempo, el juego completa lo mínimo y pasa el turno', () =
       assert.notEqual(turnKey(g), key, 'el turno no avanzó');
     }
   }
+});
+
+test('banco de recursos: 19 de cada uno y regla de escasez', () => {
+  const rng = rngFrom(31);
+  const s = mk(3, 31);
+  for (const r of RES) assert.equal(s.bank[r], 19);
+  doSetup(s, rng);
+  for (const r of RES) assert.equal(s.bank[r] + s.players.reduce((k, p) => k + p.hand[r], 0), 19);
+
+  // Buscar un número que le dé el mismo recurso a dos jugadores.
+  const shared = [];
+  for (const t of s.board.tiles) {
+    if (!t.number || t.number === 7 || t.id === s.jaguar) continue;
+    const owners = new Set(t.vertices.map((v) => s.buildings[v]?.p).filter((p) => p !== undefined));
+    if (owners.size >= 2) shared.push(t);
+  }
+  const roll = (sum) => {
+    const a = Math.min(6, sum - 1);
+    const b = sum - a;
+    const q = [(a - 1) / 6 + 0.01, (b - 1) / 6 + 0.01];
+    let i = 0;
+    return () => q[i++ % 2];
+  };
+  if (shared.length) {
+    const t = shared[0];
+    const res = { bosque: 'madera', colina: 'ladrillo', pradera: 'lana', campo: 'trigo', montana: 'piedra' }[t.terrain];
+    // Banco casi vacío: nadie cobra.
+    const extra = s.bank[res] - 1;
+    s.bank[res] = 1;
+    s.players[0].hand[res] += extra;
+    const before = s.players.map((p) => p.hand[res]);
+    s.sub = 'roll';
+    assert.ok(applyAction(s, s.turn, { type: 'roll' }, roll(t.number)).ok);
+    assert.deepEqual(s.players.map((p) => p.hand[res]), before);
+    assert.equal(s.bank[res], 1);
+  }
+
+  // El año de abundancia y el puerto respetan el banco.
+  const g = mk(2, 33);
+  doSetup(g, rng);
+  g.sub = 'main';
+  const me = g.players[g.turn];
+  me.dev = ['cosecha'];
+  g.players[1 - g.turn].hand.piedra += g.bank.piedra;
+  g.bank.piedra = 0;
+  assert.ok(applyAction(g, g.turn, { type: 'playCard', card: 'cosecha', a: 'piedra', b: 'lana' }, rng).error);
+  me.hand.madera = 4;
+  g.bank.madera -= 4;
+  assert.ok(applyAction(g, g.turn, { type: 'bankTrade', give: 'madera', get: 'piedra', n: 1 }, rng).error);
 });
