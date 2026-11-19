@@ -9,3 +9,9 @@ services:
       - PORT=3001
     expose:
       - "3001"
+    volumes:
+      # Cuentas y amigos: el volumen sobrevive a los deploys.
+      - litoral-data:/app/data
+
+volumes:
+  litoral-data:

@@ -11,12 +11,14 @@ RUN npm run build
 # Etapa 2: imagen final, solo con lo necesario para correr
 FROM node:22-alpine
 WORKDIR /app
-ENV NODE_ENV=production PORT=3001
+ENV NODE_ENV=production PORT=3001 DATA_DIR=/app/data
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server ./server
 COPY shared ./shared
 COPY --from=build /app/dist ./dist
+# Carpeta de datos (cuentas y amigos): se monta como volumen.
+RUN mkdir -p /app/data && chown node:node /app/data
 USER node
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

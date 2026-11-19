@@ -84,6 +84,9 @@ export const UI = {
   trade: ui('<path d="M4 8h13l-3-3M20 16H7l3 3"/>'),
   pause: ui('<rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/>'),
   play: ui('<path d="M7 5l12 7-12 7z" fill="currentColor"/>'),
+  bell: ui('<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" fill="currentColor" fill-opacity=".25"/><path d="M10 20a2 2 0 0 0 4 0"/>'),
+  friends: ui('<circle cx="9" cy="8" r="3.2"/><path d="M3 19c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M16 13.6c2.8.2 5 2 5 4.9"/>'),
+  user: ui('<circle cx="12" cy="8" r="3.6"/><path d="M5 20c0-3.8 3.1-6.3 7-6.3s7 2.5 7 6.3"/>'),
   gear: ui('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>'),
 };
 

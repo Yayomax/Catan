@@ -8,9 +8,13 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { createGame, applyAction, viewFor, timeoutStage, timerStage, timerKey, newFlows } from '../shared/game.js';
+import { createStore } from './accounts.js';
 
 const PORT = Number(process.env.PORT) || 3001;
-const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const DIST = path.join(ROOT, 'dist');
+// Cuentas y amigos: en Docker, DATA_DIR apunta a un volumen que sobrevive a los deploys.
+const store = createStore(process.env.DATA_DIR || path.join(ROOT, 'data'));
 const COLORS = ['#c8402f', '#2f6fb5', '#e3a21a', '#ece6d6', '#3c9a5f', '#8456b0'];
 const MAX_PLAYERS = 6;
 const TURN_OPTIONS = [0, 30, 60, 90, 120, 180]; // segundos; 0 = sin límite
@@ -19,6 +23,7 @@ const ROLL_MS = 5000; // para tirar los dados
 const DISCARD_MS = 15000; // para descartar con un 7
 const CHAT_MAX = 60;
 const OFFLINE_MS = 30000; // turno de alguien desconectado
+const LOBBY_GRACE_MS = 45000; // lugar guardado en la sala de espera
 const BONUS_ACTIONS = new Set(['buildRoad', 'buildSettlement', 'buildCity', 'buyCard', 'playCard', 'bankTrade', 'offerTrade', 'acceptTrade']);
 // Solo para pruebas automáticas: permite turnos cortos.
 if (process.env.LITORAL_TEST_TIMERS) TURN_OPTIONS.push(4, 15);
@@ -84,6 +89,178 @@ const server = http.createServer((req, res) => {
 
 const rooms = new Map();
 
+// ---------- Cuentas, presencia y amigos ----------
+
+const sockets = new Map(); // usuario -> Set de conexiones
+const invites = new Map(); // usuario -> [{ from, code, at }]
+const INVITE_MS = 15 * 60 * 1000;
+const loginFails = new Map(); // usuario -> { n, until }
+
+function setUser(ws, name) {
+  if (ws.user) sockets.get(ws.user)?.delete(ws);
+  ws.user = name || null;
+  if (name) {
+    if (!sockets.has(name)) sockets.set(name, new Set());
+    sockets.get(name).add(ws);
+  }
+}
+
+function statusOf(name) {
+  const set = sockets.get(name);
+  if (!set || !set.size) return { status: 'offline' };
+  let best = { status: 'online' };
+  for (const ws of set) {
+    const room = ws.room;
+    if (!room || !room.players.some((p) => p.ws === ws)) continue;
+    if (room.game && room.game.phase !== 'ended') return { status: 'playing', code: room.code };
+    best = { status: 'lobby', code: room.code, joinable: !room.game && room.players.length < MAX_PLAYERS };
+  }
+  return best;
+}
+
+function liveInvites(name) {
+  const list = (invites.get(name) || []).filter((i) => {
+    const room = rooms.get(i.code);
+    return Date.now() - i.at < INVITE_MS && room && !room.game && room.players.length < MAX_PLAYERS && !room.players.some((p) => p.user === name);
+  });
+  invites.set(name, list);
+  return list;
+}
+
+function pushSocial(name) {
+  const set = sockets.get(name);
+  const soc = store.social(name);
+  if (!set || !set.size || !soc) return;
+  const msg = {
+    t: 'social',
+    user: name,
+    friends: soc.friends.map((f) => ({ user: f, ...statusOf(f) })),
+    incoming: soc.incoming,
+    outgoing: soc.outgoing,
+    invites: liveInvites(name).map(({ from, code, at }) => ({ from, code, at })),
+  };
+  for (const ws of set) send(ws, msg);
+}
+
+// Avisa el cambio de estado de alguien a sus amigos (y a sí mismo).
+function presenceChanged(name) {
+  if (!name) return;
+  pushSocial(name);
+  for (const f of store.social(name)?.friends || []) pushSocial(f);
+}
+
+function roomPresence(room) {
+  for (const p of room.players) if (p.user) presenceChanged(p.user);
+}
+
+function notice(ws, msg) {
+  send(ws, { t: 'notice', msg });
+}
+
+function handleSocial(ws, m) {
+  const fail = (msg) => send(ws, { t: 'error', msg });
+
+  if (m.t === 'register' || m.t === 'login') {
+    const name = String(m.user || '').trim();
+    const k = name.toLowerCase();
+    const lock = loginFails.get(k);
+    if (lock && lock.until > Date.now()) return fail('Demasiados intentos. Probá de nuevo en unos minutos.'), true;
+    const r = m.t === 'register' ? store.register(name, m.pass) : store.login(name, m.pass);
+    if (r.error) {
+      if (m.t === 'login') {
+        const f = loginFails.get(k) || { n: 0, until: 0 };
+        f.n++;
+        if (f.n >= 8) {
+          f.n = 0;
+          f.until = Date.now() + 5 * 60 * 1000;
+        }
+        loginFails.set(k, f);
+      }
+      return send(ws, { t: 'authError', msg: r.error }), true;
+    }
+    loginFails.delete(k);
+    setUser(ws, r.user);
+    send(ws, { t: 'auth', user: r.user, token: r.token });
+    presenceChanged(r.user);
+    return true;
+  }
+
+  if (m.t === 'auth') {
+    const name = store.resume(m.token);
+    if (!name) return send(ws, { t: 'authFail' }), true;
+    setUser(ws, name);
+    send(ws, { t: 'auth', user: name });
+    presenceChanged(name);
+    return true;
+  }
+
+  if (m.t === 'logout') {
+    const name = ws.user;
+    store.logout(m.token);
+    setUser(ws, null);
+    send(ws, { t: 'loggedOut' });
+    presenceChanged(name);
+    return true;
+  }
+
+  const SOCIAL = ['friendReq', 'friendRes', 'unfriend', 'invite', 'dismissInvite', 'social'];
+  if (!SOCIAL.includes(m.t)) return false;
+  if (!ws.user) return fail('Entrá con tu cuenta para usar amigos.'), true;
+  const me = ws.user;
+
+  if (m.t === 'social') return pushSocial(me), true;
+
+  if (m.t === 'friendReq') {
+    const r = store.request(me, m.to);
+    if (r.error) return fail(r.error), true;
+    notice(ws, r.ok === 'accepted' ? `Ahora son amigos con ${r.other}.` : `Solicitud enviada a ${r.other}.`);
+    for (const q of sockets.get(r.other) || []) send(q, { t: 'friendPing', from: me, kind: r.ok });
+    presenceChanged(me);
+    presenceChanged(r.other);
+    return true;
+  }
+
+  if (m.t === 'friendRes') {
+    const r = store.respond(me, m.from, !!m.accept);
+    if (r.error) return fail(r.error), true;
+    if (r.ok === 'accepted') for (const q of sockets.get(r.other) || []) send(q, { t: 'friendPing', from: me, kind: 'accepted' });
+    presenceChanged(me);
+    presenceChanged(r.other);
+    return true;
+  }
+
+  if (m.t === 'unfriend') {
+    const r = store.unfriend(me, m.user);
+    if (r.error) return fail(r.error), true;
+    presenceChanged(me);
+    presenceChanged(r.other);
+    return true;
+  }
+
+  if (m.t === 'invite') {
+    const room = ws.room;
+    const to = store.displayName(m.to);
+    if (!to || !store.areFriends(me, to)) return fail('Solo podés invitar a tus amigos.'), true;
+    if (!room || room.game || !room.players.some((p) => p.ws === ws)) return fail('Invitá desde una sala que todavía no empezó.'), true;
+    if (room.players.length >= MAX_PLAYERS) return fail('La sala está llena.'), true;
+    if (statusOf(to).status === 'offline') return fail(`${to} no está conectado.`), true;
+    const list = (invites.get(to) || []).filter((i) => i.from !== me);
+    list.push({ from: me, code: room.code, at: Date.now() });
+    invites.set(to, list.slice(-10));
+    for (const q of sockets.get(to) || []) send(q, { t: 'invited', from: me, code: room.code });
+    pushSocial(to);
+    notice(ws, `Invitación enviada a ${to}.`);
+    return true;
+  }
+
+  if (m.t === 'dismissInvite') {
+    invites.set(me, (invites.get(me) || []).filter((i) => !(i.from === m.from && i.code === m.code)));
+    pushSocial(me);
+    return true;
+  }
+  return false;
+}
+
 // Identifica la versión del cliente: si cambia, las pestañas abiertas se recargan.
 let BUILD = 'dev';
 try {
@@ -110,7 +287,7 @@ function broadcast(room) {
         t: 'lobby',
         code: room.code,
         you: i,
-        players: room.players.map((q, k) => ({ name: q.name, color: q.color, online: !!q.ws, ready: k === 0 || q.ready })),
+        players: room.players.map((q, k) => ({ name: q.name, color: q.color, online: !!q.ws, ready: k === 0 || q.ready, user: q.user || null })),
         settings: room.settings,
       });
       return;
@@ -122,6 +299,7 @@ function broadcast(room) {
       code: room.code,
       you: i,
       online: room.players.map((q) => !!q.ws),
+      accounts: room.players.map((q) => q.user || null),
       settings: room.settings,
       timer: room.deadline ? { deadline: room.deadline, total: room.timerTotal, stage: timerStage(room.game) } : null,
       now: Date.now(),
@@ -188,6 +366,15 @@ function addBonus(room) {
   room.deadline = Math.min(room.deadline + BONUS_MS, Date.now() + secs * 1000);
 }
 
+function removeFromLobby(room, p) {
+  const i = room.players.indexOf(p);
+  if (i < 0) return;
+  room.players.splice(i, 1);
+  room.players.forEach((q, k) => q.ws && (q.ws.index = k));
+  broadcast(room);
+  if (p.user) presenceChanged(p.user);
+}
+
 function attach(ws, room, index) {
   const p = room.players[index];
   if (p.ws && p.ws !== ws) p.ws.close();
@@ -203,6 +390,7 @@ function attach(ws, room, index) {
 
 function handle(ws, m) {
   const fail = (msg) => send(ws, { t: 'error', msg });
+  if (handleSocial(ws, m)) return;
 
   if (m.t === 'create' || m.t === 'join') {
     let room;
@@ -216,25 +404,46 @@ function handle(ws, m) {
       if (room.players.length >= MAX_PLAYERS) return fail('La sala está llena.');
     }
     const used = new Set(room.players.map((p) => p.color));
+    if (ws.user && room.players.some((p) => p.user === ws.user)) return fail('Ya estás en esa sala desde otra pestaña.');
     room.players.push({
-      name: cleanName(m.name),
+      // Con cuenta, el nombre en la sala es el de la cuenta.
+      name: ws.user || cleanName(m.name),
+      user: ws.user || null,
       color: COLORS.find((c) => !used.has(c)),
       ready: false,
       token: crypto.randomBytes(12).toString('hex'),
       ws: null,
     });
-    return attach(ws, room, room.players.length - 1);
+    attach(ws, room, room.players.length - 1);
+    if (ws.user) {
+      invites.set(ws.user, (invites.get(ws.user) || []).filter((i) => i.code !== room.code));
+      presenceChanged(ws.user);
+    }
+    return;
   }
 
   if (m.t === 'rejoin') {
     const room = rooms.get(String(m.code || '').toUpperCase());
     const index = room ? room.players.findIndex((p) => p.token === m.token) : -1;
     if (index < 0) return send(ws, { t: 'gone' });
-    return attach(ws, room, index);
+    attach(ws, room, index);
+    return presenceChanged(ws.user);
   }
 
   const room = ws.room;
   if (!room) return fail('No estás en una sala.');
+
+  // Salir de la sala de espera a propósito: el lugar se libera en el momento.
+  if (m.t === 'leaveRoom') {
+    const p = room.players[ws.index];
+    ws.room = null;
+    if (p && p.ws === ws) {
+      p.ws = null;
+      if (!room.game && ws.index !== 0) removeFromLobby(room, p);
+      else broadcast(room);
+    }
+    return presenceChanged(ws.user);
+  }
 
   if (m.t === 'chat') {
     const text = String(m.text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
@@ -273,6 +482,7 @@ function handle(ws, m) {
     if (room.players.length < 2) return fail('Hacen falta al menos 2 jugadores.');
     if (!room.game && room.players.some((p, k) => k > 0 && !p.ready)) return fail('Todavía no están todos listos.');
     room.game = createGame(room.players);
+    setTimeout(() => roomPresence(room), 0);
     room.paused = null;
     room.pausedLeft = null;
     room.turnKey = null;
@@ -311,6 +521,7 @@ function handle(ws, m) {
     newFlows(g);
     const r = applyAction(g, ws.index, m.a);
     if (r.error) return fail(r.error);
+    if (g.phase === 'ended') setTimeout(() => roomPresence(room), 0);
     if (wasTurn && m.a && BONUS_ACTIONS.has(m.a.type)) addBonus(room);
     schedule(room);
     return broadcast(room);
@@ -339,14 +550,22 @@ wss.on('connection', (ws) => {
     }
   });
   ws.on('close', () => {
+    const user = ws.user;
+    setUser(ws, null);
+    if (user) setTimeout(() => presenceChanged(user), 0);
     const room = ws.room;
     if (!room) return;
     const p = room.players[ws.index];
     if (p && p.ws === ws) {
       p.ws = null;
-      // En la sala de espera, quien se va libera su lugar.
-      if (!room.game && ws.index !== 0) room.players.splice(ws.index, 1);
-      room.players.forEach((q, i) => q.ws && (q.ws.index = i));
+      // En la sala de espera, si alguien se desconecta (o recarga) se le guarda
+      // el lugar un rato; si no vuelve, se libera.
+      if (!room.game && ws.index !== 0) {
+        setTimeout(() => {
+          if (p.ws || room.game || !room.players.includes(p)) return;
+          removeFromLobby(room, p);
+        }, LOBBY_GRACE_MS);
+      }
       if (room.game) schedule(room);
       broadcast(room);
     }
@@ -369,5 +588,13 @@ setInterval(() => {
     }
   }
 }, 30000);
+
+// Al apagar (deploy), guardar las cuentas antes de salir.
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    store.flush();
+    process.exit(0);
+  });
+}
 
 server.listen(PORT, () => console.log(`Litoral escuchando en http://localhost:${PORT}`));

@@ -28,6 +28,15 @@ let mode = null; // 'road' | 'settlement' | 'city'
 let modal = null; // { kind, ...datos }
 let lastRoll = 0;
 let logOpen = false;
+// Cuenta (opcional) y amigos.
+let account = JSON.parse(localStorage.getItem('litoral.account') || 'null'); // { user, token }
+let social = null; // { friends, incoming, outgoing, invites }
+let socialView = null; // null | 'auth' | 'friends' | 'notifs'
+let authMode = 'login';
+let authError = '';
+let pendingJoin = null; // código de sala al que hay que entrar al reconectar
+let accounts = []; // usuario de cada jugador de la partida (o null)
+const saveAccount = () => (account ? localStorage.setItem('litoral.account', JSON.stringify(account)) : localStorage.removeItem('litoral.account'));
 let menuOpen = false;
 let paused = null; // { by, name } si la partida está en pausa
 const prefs = { sound: true, volume: 0.7, ticks: true, anim: true, vibrate: true, ...JSON.parse(localStorage.getItem('litoral.prefs') || '{}') };
@@ -65,8 +74,13 @@ function connect() {
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => {
     connected = true;
+    // Primero la cuenta (si hay), después la sala.
+    if (account?.token) send({ t: 'auth', token: account.token });
     const s = session.get();
-    if (s) send({ t: 'rejoin', code: s.code, token: s.token });
+    if (pendingJoin) {
+      send({ t: 'join', code: pendingJoin, name: account?.user || localStorage.getItem('litoral.name') || 'Jugador' });
+      pendingJoin = null;
+    } else if (s) send({ t: 'rejoin', code: s.code, token: s.token });
     render();
   };
   ws.onclose = () => {
@@ -81,7 +95,30 @@ const send = (m) => ws && ws.readyState === 1 && ws.send(JSON.stringify(m));
 const act = (a) => send({ t: 'act', a });
 
 function onMessage(m) {
-  if (m.t === 'joined') {
+  if (m.t === 'auth') {
+    account = { user: m.user, token: m.token || account?.token };
+    saveAccount();
+    authError = '';
+    if (socialView === 'auth') socialView = null;
+    $('screen').innerHTML = '';
+  } else if (m.t === 'authFail' || m.t === 'loggedOut') {
+    account = null;
+    social = null;
+    saveAccount();
+    $('screen').innerHTML = '';
+  } else if (m.t === 'authError') {
+    authError = m.msg;
+  } else if (m.t === 'social') {
+    social = m;
+  } else if (m.t === 'invited') {
+    play('chat');
+    inviteToast(m.from, m.code);
+  } else if (m.t === 'friendPing') {
+    play('chat');
+    toast(m.kind === 'accepted' ? `${m.from} aceptó tu solicitud de amistad.` : `${m.from} te mandó una solicitud de amistad.`, 'info');
+  } else if (m.t === 'notice') {
+    toast(m.msg, 'info');
+  } else if (m.t === 'joined') {
     session.set({ code: m.code, token: m.token });
     history.replaceState(null, '', `?sala=${m.code}`);
   } else if (m.t === 'lobby') {
@@ -104,6 +141,7 @@ function onMessage(m) {
     lobby = { code: m.code };
     you = m.you;
     online = m.online;
+    accounts = m.accounts || [];
     timer = m.timer;
     clockOffset = m.now - Date.now();
     const prev = fresh ? null : S;
@@ -181,9 +219,10 @@ function onMessage(m) {
 }
 
 let toastTimer = null;
-function toast(msg) {
+function toast(msg, kind) {
   const el = $('toast');
   el.textContent = msg;
+  el.classList.toggle('info', kind === 'info');
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
@@ -366,6 +405,122 @@ function picker(key, values, max, hint) {
   }).join('')}</div>`;
 }
 
+function badgeCount() {
+  return social ? social.incoming.length + social.invites.length : 0;
+}
+
+function renderTopbar() {
+  const el = $('topbar');
+  if (S) {
+    el.innerHTML = '';
+    return;
+  }
+  const n = badgeCount();
+  el.innerHTML = account
+    ? `<button class="chip" data-act="openNotifs" title="Notificaciones">${UI.bell}${n ? `<i class="badge">${n}</i>` : ''}</button>
+       <button class="chip" data-act="openFriends">${UI.friends}<span>Amigos</span></button>
+       <button class="chip me" data-act="openAccount"><span class="avatar small">${esc(account.user.slice(0, 1).toUpperCase())}</span><span>${esc(account.user)}</span></button>`
+    : `<button class="chip" data-act="openNotifs" title="Notificaciones">${UI.bell}</button>
+       <button class="chip" data-act="openAuth">${UI.user}<span>Entrar</span></button>`;
+}
+
+const STATUS_TEXT = { online: 'En línea', lobby: 'En una sala', playing: 'Jugando', offline: 'Desconectado' };
+const myRoomCode = () => lobby?.code || null;
+const inLobby = () => !!(lobby && lobby.players && !S);
+
+function friendRow(f) {
+  const here = (lobby?.players || []).some((p) => p.user === f.user) || accounts.includes(f.user);
+  let action = '';
+  if (here) action = '<span class="muted">En tu sala</span>';
+  else if (inLobby() && f.status !== 'offline' && f.status !== 'playing') action = `<button class="btn small primary" data-act="inviteFriend" data-user="${esc(f.user)}">Invitar</button>`;
+  else if (f.status === 'lobby' && f.joinable && !S && !inLobby()) action = `<button class="btn small" data-act="joinFriend" data-code="${esc(f.code)}">Unirme</button>`;
+  return `<li class="friend ${f.status}"><span class="sdot"></span>
+    <div><b>${esc(f.user)}</b><small>${STATUS_TEXT[f.status]}${f.status === 'lobby' && f.code ? ` · sala ${esc(f.code)}` : ''}</small></div>
+    ${action}<button class="x" data-act="unfriend" data-user="${esc(f.user)}" title="Quitar de amigos" aria-label="Quitar de amigos">×</button></li>`;
+}
+
+function socialHTML() {
+  const close = '<button class="x" data-act="closeSocial" aria-label="cerrar">×</button>';
+  if (socialView === 'auth') {
+    const reg = authMode === 'register';
+    return `${close}<h2>${reg ? 'Crear cuenta' : 'Entrar'}</h2>
+      <p class="muted">La cuenta es opcional: sirve para agregar amigos, ver quién está en línea e invitarlos.</p>
+      <div class="tabs2"><button class="${reg ? '' : 'on'}" data-act="authMode" data-m="login">Entrar</button><button class="${reg ? 'on' : ''}" data-act="authMode" data-m="register">Crear cuenta</button></div>
+      <form data-form="auth" class="authform">
+        <label>Usuario<input id="authUser" maxlength="16" autocomplete="username" autocapitalize="none" placeholder="3 a 16 letras o números" /></label>
+        <label>Contraseña<input id="authPass" type="password" maxlength="100" autocomplete="${reg ? 'new-password' : 'current-password'}" placeholder="Al menos 6 caracteres" /></label>
+        ${authError ? `<p class="notice">${esc(authError)}</p>` : ''}
+        <button class="btn primary">${reg ? 'Crear cuenta' : 'Entrar'}</button>
+      </form>`;
+  }
+  if (socialView === 'account') {
+    return `${close}<h2>${esc(account.user)}</h2>
+      <p class="muted">Con esta cuenta tus amigos te ven en línea y pueden invitarte.</p>
+      <button class="btn" data-act="openFriends">${UI.friends}<span>Amigos</span></button>
+      <button class="btn danger" data-act="logout">Cerrar sesión</button>`;
+  }
+  if (!account) {
+    return `${close}<h2>${socialView === 'notifs' ? 'Notificaciones' : 'Amigos'}</h2>
+      <p>Para recibir invitaciones y agregar amigos necesitás una cuenta. Es opcional: podés seguir jugando como invitado.</p>
+      <button class="btn primary" data-act="openAuth">Entrar o crear cuenta</button>`;
+  }
+  const soc = social || { friends: [], incoming: [], outgoing: [], invites: [] };
+  if (socialView === 'notifs') {
+    const items = [
+      ...soc.invites.map((i) => `<li class="notif">${UI.bell}<div><b>${esc(i.from)}</b> te invita a la sala <b>${esc(i.code)}</b></div>
+        <button class="btn small" data-act="dismissInvite" data-from="${esc(i.from)}" data-code="${esc(i.code)}">Ignorar</button>
+        <button class="btn small primary" data-act="joinInvite" data-from="${esc(i.from)}" data-code="${esc(i.code)}">Unirme</button></li>`),
+      ...soc.incoming.map((u) => `<li class="notif">${UI.friends}<div><b>${esc(u)}</b> quiere ser tu amigo</div>
+        <button class="btn small" data-act="friendRes" data-from="${esc(u)}" data-v="0">Rechazar</button>
+        <button class="btn small primary" data-act="friendRes" data-from="${esc(u)}" data-v="1">Aceptar</button></li>`),
+    ];
+    return `${close}<h2>Notificaciones</h2><ul class="notifs">${items.join('') || '<li class="muted">No tenés notificaciones.</li>'}</ul>`;
+  }
+  // Amigos
+  const order = { playing: 1, lobby: 0, online: 0, offline: 2 };
+  const friends = soc.friends.slice().sort((a, b) => order[a.status] - order[b.status] || a.user.localeCompare(b.user));
+  const here = (S ? accounts : (lobby?.players || []).map((p) => p.user)).filter((u) => u && u !== account.user);
+  const addable = here.filter((u) => !soc.friends.some((f) => f.user === u));
+  return `${close}<h2>Amigos</h2>
+    ${inLobby() ? '<p class="muted">Tocá "Invitar" y a tu amigo le llega la invitación a esta sala.</p>' : ''}
+    ${addable.length ? `<h4>Jugadores de esta sala</h4><ul class="friends">${addable.map((u) => `<li class="friend"><div><b>${esc(u)}</b></div>${friendButton(u)}</li>`).join('')}</ul>` : ''}
+    <h4>Tus amigos (${soc.friends.length})</h4>
+    <ul class="friends">${friends.map(friendRow).join('') || '<li class="muted">Todavía no agregaste a nadie.</li>'}</ul>
+    ${soc.outgoing.length ? `<h4>Solicitudes enviadas</h4><p class="muted">${soc.outgoing.map(esc).join(', ')}</p>` : ''}
+    <form data-form="addFriend" class="addfriend"><input id="addFriend" maxlength="16" autocapitalize="none" placeholder="Agregar por usuario" /><button class="btn small primary">Agregar</button></form>`;
+}
+
+// Botón de amistad para un jugador con cuenta que ves en la sala.
+function friendButton(u) {
+  if (!account || !u || u === account.user) return '';
+  const soc = social || { friends: [], incoming: [], outgoing: [] };
+  if (soc.friends.some((f) => f.user === u)) return '<span class="fbadge">Amigo</span>';
+  if (soc.outgoing.includes(u)) return '<span class="fbadge muted">Enviada</span>';
+  if (soc.incoming.includes(u)) return `<button class="btn small primary" data-act="friendRes" data-from="${esc(u)}" data-v="1">Aceptar</button>`;
+  return `<button class="btn small" data-act="addFriendUser" data-user="${esc(u)}">+ Amigo</button>`;
+}
+
+function renderSocial() {
+  const el = $('social');
+  const html = socialView ? socialHTML() : '';
+  el.className = html ? 'show' : '';
+  if (!html) {
+    el.innerHTML = '';
+    return;
+  }
+  // No pisar lo que se está escribiendo en el formulario.
+  const typing = document.activeElement && el.contains(document.activeElement) && document.activeElement.tagName === 'INPUT';
+  const keep = typing ? { id: document.activeElement.id, v: document.activeElement.value } : null;
+  const auth = { u: $('authUser')?.value, p: $('authPass')?.value };
+  el.innerHTML = `<div class="sheet">${html}</div>`;
+  if ($('authUser') && auth.u) $('authUser').value = auth.u;
+  if ($('authPass') && auth.p) $('authPass').value = auth.p;
+  if (keep && $(keep.id)) {
+    $(keep.id).value = keep.v;
+    $(keep.id).focus();
+  }
+}
+
 function renderScreen() {
   const el = $('screen');
   $('ui').hidden = !S;
@@ -383,7 +538,8 @@ function renderScreen() {
       <h1>Litoral</h1>
       <p class="muted">Código de la sala</p>
       <div class="code">${esc(lobby.code)}</div>
-      <button class="btn ghost" data-act="copy">Copiar enlace para invitar</button>
+      <div class="row"><button class="btn ghost" data-act="copy">Copiar enlace para invitar</button>
+      ${account ? `<button class="btn ghost" data-act="openFriends">${UI.friends}<span>Invitar amigos</span></button>` : ''}</div>
       <div class="setting">
         <span>Tiempo por turno</span>
         ${host
@@ -399,7 +555,7 @@ function renderScreen() {
         ${lobby.settings.showBank ? '' : '<small>Nadie ve las cantidades del banco: hay que llevar la cuenta de memoria.</small>'}
       </div>
       <ul class="roster">${lobby.players
-        .map((p, i) => `<li><span class="dot" style="background:${p.color}"></span>${esc(p.name)}${i === 0 ? ' <em>anfitrión</em>' : ''}${i === you ? ' <em>vos</em>' : ''}<span class="rdy ${p.ready ? 'on' : ''}">${p.ready ? 'Listo' : 'Esperando'}</span></li>`)
+        .map((p, i) => `<li><span class="dot" style="background:${p.color}"></span>${esc(p.name)}${i === 0 ? ' <em>anfitrión</em>' : ''}${i === you ? ' <em>vos</em>' : ''}${p.user && i !== you ? `<span class="fbtn">${friendButton(p.user)}</span>` : ''}<span class="rdy ${p.ready ? 'on' : ''}">${p.ready ? 'Listo' : 'Esperando'}</span></li>`)
         .join('')}</ul>
       ${host
         ? `<button class="btn primary" data-act="start" ${lobby.players.length < 2 || !allReady ? 'disabled' : ''}>Empezar partida</button>
@@ -418,7 +574,10 @@ function renderScreen() {
     <div class="byline">by <b>Rocket Flame</b></div>
     <p class="lead">Poblá la isla: juntá recursos, construí carreteras y comerciá con tus amigos.</p>
     ${notice ? `<p class="notice">${esc(notice)}</p>` : ''}
-    <label>Tu nombre<input id="name" maxlength="16" autocomplete="off" value="${esc(localStorage.getItem('litoral.name') || '')}" placeholder="Nombre" /></label>
+    ${account
+      ? `<div class="playingas">Jugás como <b>${esc(account.user)}</b><input id="name" type="hidden" value="${esc(account.user)}" /></div>`
+      : `<label>Tu nombre<input id="name" maxlength="16" autocomplete="off" value="${esc(localStorage.getItem('litoral.name') || '')}" placeholder="Nombre" /></label>
+         <button class="btn link" data-act="openAuth">¿Tenés cuenta? Entrá para jugar con amigos</button>`}
     ${urlCode
       ? `<div class="invite">Te invitaron a la sala <b>${esc(urlCode.toUpperCase())}</b></div>
          <input id="code" type="hidden" value="${esc(urlCode)}" />
@@ -522,6 +681,17 @@ function fmtLog(line) {
   h = h.replace(/(\w+)/g, (m, id) => `<i class="ldev">${DEV_ART[id]}</i><b>${CARD_INFO[id].label}</b>`);
   h = h.replace(/(\d+)/g, (m, i) => `<b class="pname" style="--c:${S.players[i].color}">${esc(S.players[i].name)}</b>`);
   return h;
+}
+
+let inviteTimer = null;
+function inviteToast(from, code) {
+  const el = $('invtoast');
+  el.innerHTML = `<span>${UI.bell}<b>${esc(from)}</b> te invita a su sala</span>
+    <button class="btn small" data-act="dismissInviteToast">Ahora no</button>
+    <button class="btn primary small" data-act="joinInvite" data-code="${esc(code)}" data-from="${esc(from)}">Unirme</button>`;
+  el.classList.add('show');
+  clearTimeout(inviteTimer);
+  inviteTimer = setTimeout(() => el.classList.remove('show'), 15000);
 }
 
 let chatToastTimer = null;
@@ -768,6 +938,8 @@ function renderMenu() {
   el.innerHTML = S && menuOpen
     ? `<button data-act="openSettings">${UI.gear}<span>Ajustes</span></button>
        <button data-act="pause" data-v="${paused ? 0 : 1}">${paused ? UI.play : UI.pause}<span>${paused ? 'Reanudar' : 'Pausar la partida'}</span></button>
+       <button data-act="openFriends">${UI.friends}<span>Amigos</span></button>
+       <button data-act="openNotifs">${UI.bell}<span>Notificaciones${badgeCount() ? ` (${badgeCount()})` : ''}</span></button>
        <button data-act="openRules">${UI.dev}<span>Reglas</span></button>
        <button class="danger" data-act="askLeave">${UI.cross}<span>Salir de la partida</span></button>`
     : '';
@@ -794,6 +966,8 @@ function renderModal() {
 
 function render() {
   renderScreen();
+  renderTopbar();
+  renderSocial();
   if (S) {
     renderPlayers();
     $('status').innerHTML = `<span class="${myTurn() || S.discards[you] ? 'mine' : ''}">${statusText()}<b id="clock"></b></span>`;
@@ -937,6 +1111,25 @@ function flyCard(res, from, to, delay, onLand) {
 
 // ---------- Acciones de la interfaz ----------
 
+// Entrar a otra sala: si ya estás en una, se sale y se entra al reconectar.
+function goToRoom(code) {
+  socialView = null;
+  if (S || lobby) {
+    if (S && S.phase !== 'ended' && !confirm('Vas a salir de la partida en la que estás. ¿Seguir?')) return;
+    session.clear();
+    S = null;
+    lobby = null;
+    modal = null;
+    pendingJoin = code;
+    history.replaceState(null, '', `?sala=${code}`);
+    $('screen').innerHTML = '';
+    ws.close();
+    return;
+  }
+  history.replaceState(null, '', `?sala=${code}`);
+  send({ t: 'join', code, name: account?.user || localStorage.getItem('litoral.name') || 'Jugador' });
+}
+
 const nameValue = () => {
   const name = ($('name')?.value || '').trim();
   if (!name) toast('Poné tu nombre.');
@@ -960,6 +1153,7 @@ const ACT = {
     else if (name) toast('El código tiene 4 letras.');
   },
   leave: () => {
+    send({ t: 'leaveRoom' });
     modal = null;
     menuOpen = false;
     S = null;
@@ -969,6 +1163,59 @@ const ACT = {
     ws.close();
   },
   start: () => send({ t: 'start' }),
+  openAuth: () => {
+    socialView = 'auth';
+    authError = '';
+    render();
+    setTimeout(() => $('authUser')?.focus(), 30);
+  },
+  openAccount: () => {
+    socialView = 'account';
+    render();
+  },
+  openFriends: () => {
+    menuOpen = false;
+    socialView = 'friends';
+    if (account) send({ t: 'social' });
+    render();
+  },
+  openNotifs: () => {
+    menuOpen = false;
+    socialView = 'notifs';
+    render();
+  },
+  closeSocial: () => {
+    socialView = null;
+    render();
+  },
+  authMode: (d) => {
+    authMode = d.m;
+    authError = '';
+    render();
+  },
+  logout: () => {
+    send({ t: 'logout', token: account?.token });
+    account = null;
+    social = null;
+    saveAccount();
+    socialView = null;
+    $('screen').innerHTML = '';
+    render();
+  },
+  addFriendUser: (d) => send({ t: 'friendReq', to: d.user }),
+  friendRes: (d) => send({ t: 'friendRes', from: d.from, accept: d.v === '1' }),
+  unfriend: (d) => {
+    if (confirm(`¿Quitar a ${d.user} de tus amigos?`)) send({ t: 'unfriend', user: d.user });
+  },
+  inviteFriend: (d) => send({ t: 'invite', to: d.user }),
+  dismissInvite: (d) => send({ t: 'dismissInvite', from: d.from, code: d.code }),
+  dismissInviteToast: () => $('invtoast').classList.remove('show'),
+  joinFriend: (d) => goToRoom(d.code),
+  joinInvite: (d) => {
+    $('invtoast').classList.remove('show');
+    send({ t: 'dismissInvite', from: d.from, code: d.code });
+    goToRoom(d.code);
+  },
   newRoom: () => {
     history.replaceState(null, '', location.pathname);
     $('screen').innerHTML = '';
@@ -1203,6 +1450,18 @@ document.addEventListener('input', (ev) => {
   savePrefs();
 });
 document.addEventListener('submit', (ev) => {
+  if (ev.target.dataset.form === 'auth') {
+    ev.preventDefault();
+    send({ t: authMode === 'register' ? 'register' : 'login', user: $('authUser').value.trim(), pass: $('authPass').value });
+    return;
+  }
+  if (ev.target.dataset.form === 'addFriend') {
+    ev.preventDefault();
+    const u = $('addFriend').value.trim();
+    if (u) send({ t: 'friendReq', to: u });
+    $('addFriend').value = '';
+    return;
+  }
   if (ev.target.dataset.form !== 'chat') return;
   ev.preventDefault();
   const input = $('chatInput');
@@ -1213,7 +1472,8 @@ document.addEventListener('submit', (ev) => {
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter' && ev.target.id === 'name') ACT[$('code')?.value ? 'join' : 'create']();
   if (ev.key === 'Enter' && ev.target.id === 'code') ACT.join();
-  if (ev.key === 'Escape' && confirmBuild) ACT.cancelBuild();
+  if (ev.key === 'Escape' && socialView) ACT.closeSocial();
+  else if (ev.key === 'Escape' && confirmBuild) ACT.cancelBuild();
   else if (ev.key === 'Escape' && modal && !['steal', 'discard'].includes(modal.kind)) closeModal();
 });
 

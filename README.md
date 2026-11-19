@@ -45,6 +45,10 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 Las salas viven en memoria: cada redeploy o reinicio del contenedor corta las partidas
 en curso. Tiene que correr una sola réplica.
 
+Las cuentas (opcionales) y los amigos se guardan en `/app/data/accounts.json`, dentro del
+volumen `litoral-data` que declara el compose. Coolify lo crea solo y sobrevive a los
+deploys. Las contraseñas se guardan con hash (scrypt), nunca en texto plano.
+
 ## Reglas
 
 Tablero según la cantidad de jugadores, con las cantidades del juego original:
